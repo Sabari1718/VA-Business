@@ -4,16 +4,15 @@ import '../models/business_response_model.dart';
 
 class PlatformRepository {
   static const String baseApiUrl = 'https://business-setup.srivagroups.in/api';
-  final String userId = '2146610213'; // Default userId used in this app
+  final String userId = '2146610213';
 
-  // --- Platform API ---
+  // --- Platform API --- Fetch ALL platforms (no userId filter)
   Future<BusinessResponseModel> getPlatforms() async {
-    final url = Uri.parse('$baseApiUrl/platform?userId=$userId');
+    final url = Uri.parse('$baseApiUrl/platform');
     print('GET PLATFORMS API CALLING: $url');
     final response = await http.get(url);
     
     print('GET PLATFORMS API STATUS: ${response.statusCode}');
-    print('GET PLATFORMS API BODY: ${response.body}');
     
     if (response.statusCode == 200) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
@@ -25,16 +24,7 @@ class PlatformRepository {
   Future<BusinessResponseModel> createPlatform(Map<String, dynamic> data) async {
     data['userId'] = userId;
     final url = Uri.parse('$baseApiUrl/platform');
-    print('CREATE PLATFORM API CALLING: $url WITH BODY: $data');
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(data),
-    );
-    
-    print('CREATE PLATFORM API STATUS: ${response.statusCode}');
-    print('CREATE PLATFORM API BODY: ${response.body}');
-    
+    final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: json.encode(data));
     if (response.statusCode == 201 || response.statusCode == 200) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
     } else {
@@ -45,16 +35,7 @@ class PlatformRepository {
   Future<BusinessResponseModel> updatePlatform(String id, Map<String, dynamic> data) async {
     data['userId'] = userId;
     final url = Uri.parse('$baseApiUrl/platform/$id');
-    print('UPDATE PLATFORM API CALLING: $url WITH BODY: $data');
-    final response = await http.put(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(data),
-    );
-    
-    print('UPDATE PLATFORM API STATUS: ${response.statusCode}');
-    print('UPDATE PLATFORM API BODY: ${response.body}');
-    
+    final response = await http.put(url, headers: {'Content-Type': 'application/json'}, body: json.encode(data));
     if (response.statusCode == 200 || response.statusCode == 201) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
     } else {
@@ -64,50 +45,51 @@ class PlatformRepository {
   
   Future<void> deletePlatform(String id) async {
     final url = Uri.parse('$baseApiUrl/platform/$id');
-    print('DELETE PLATFORM API CALLING: $url');
-    final response = await http.delete(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'userId': userId}),
-    );
-    
-    print('DELETE PLATFORM API STATUS: ${response.statusCode}');
-    print('DELETE PLATFORM API BODY: ${response.body}');
-    
+    final response = await http.delete(url, headers: {'Content-Type': 'application/json'}, body: json.encode({'userId': userId}));
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to delete platform');
     }
   }
 
-  // --- Shop Type API ---
-  Future<BusinessResponseModel> getShopTypes() async {
-    final url = Uri.parse('$baseApiUrl/shop-type?userId=$userId');
-    print('GET SHOP TYPES API CALLING: $url');
+  // --- Shop Type API --- Fetch ALL shop types by platform_id via platform-assign
+  Future<BusinessResponseModel> getShopTypesByPlatformId(String platformId) async {
+    final url = Uri.parse('$baseApiUrl/platform-assign?platform_id=$platformId');
+    print('GET SHOP TYPES FOR PLATFORM $platformId: $url');
     final response = await http.get(url);
     
-    print('GET SHOP TYPES API STATUS: ${response.statusCode}');
-    print('GET SHOP TYPES API BODY: ${response.body}');
+    print('GET SHOP TYPES STATUS: ${response.statusCode}');
     
     if (response.statusCode == 200) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
     } else {
-      throw Exception('Failed to load shop types');
+      throw Exception('Failed to load shop types for platform $platformId');
     }
+  }
+
+  /// Get ALL platform assignments (used to derive unique platforms/shop types)
+  Future<BusinessResponseModel> getPlatformAssignments() async {
+    final url = Uri.parse('$baseApiUrl/platform-assign');
+    print('GET PLATFORM ASSIGNMENTS API CALLING: $url');
+    final response = await http.get(url);
+    
+    print('GET PLATFORM ASSIGNMENTS API STATUS: ${response.statusCode}');
+    
+    if (response.statusCode == 200) {
+      return BusinessResponseModel.fromJson(json.decode(response.body));
+    } else {
+      throw Exception('Failed to load platform assignments');
+    }
+  }
+
+  Future<BusinessResponseModel> getShopTypes() async {
+    // Fallback: get all shop types from all platform assignments
+    return getPlatformAssignments();
   }
 
   Future<BusinessResponseModel> createShopType(Map<String, dynamic> data) async {
     data['userId'] = userId;
     final url = Uri.parse('$baseApiUrl/shop-type');
-    print('CREATE SHOP TYPE API CALLING: $url WITH BODY: $data');
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(data),
-    );
-    
-    print('CREATE SHOP TYPE API STATUS: ${response.statusCode}');
-    print('CREATE SHOP TYPE API BODY: ${response.body}');
-    
+    final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: json.encode(data));
     if (response.statusCode == 201 || response.statusCode == 200) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
     } else {
@@ -118,70 +100,26 @@ class PlatformRepository {
   Future<BusinessResponseModel> updateShopType(String id, Map<String, dynamic> data) async {
     data['userId'] = userId;
     final url = Uri.parse('$baseApiUrl/shop-type/$id');
-    print('UPDATE SHOP TYPE API CALLING: $url WITH BODY: $data');
-    final response = await http.put(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(data),
-    );
-    
-    print('UPDATE SHOP TYPE API STATUS: ${response.statusCode}');
-    print('UPDATE SHOP TYPE API BODY: ${response.body}');
-    
+    final response = await http.put(url, headers: {'Content-Type': 'application/json'}, body: json.encode(data));
     if (response.statusCode == 200) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
     } else {
       throw Exception('Failed to update shop type');
     }
   }
-
   
   Future<void> deleteShopType(String id) async {
     final url = Uri.parse('$baseApiUrl/shop-type/$id');
-    print('DELETE SHOP TYPE API CALLING: $url');
-    final response = await http.delete(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'userId': userId}),
-    );
-    
-    print('DELETE SHOP TYPE API STATUS: ${response.statusCode}');
-    print('DELETE SHOP TYPE API BODY: ${response.body}');
-    
+    final response = await http.delete(url, headers: {'Content-Type': 'application/json'}, body: json.encode({'userId': userId}));
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to delete shop type');
-    }
-  }
-
-  // --- Platform Assign API ---
-  Future<BusinessResponseModel> getPlatformAssignments() async {
-    final url = Uri.parse('$baseApiUrl/platform-assign?userId=$userId');
-    print('GET PLATFORM ASSIGNMENTS API CALLING: $url');
-    final response = await http.get(url);
-    
-    print('GET PLATFORM ASSIGNMENTS API STATUS: ${response.statusCode}');
-    print('GET PLATFORM ASSIGNMENTS API BODY: ${response.body}');
-    
-    if (response.statusCode == 200) {
-      return BusinessResponseModel.fromJson(json.decode(response.body));
-    } else {
-      throw Exception('Failed to load platform assignments');
     }
   }
 
   Future<BusinessResponseModel> assignPlatform(Map<String, dynamic> data) async {
     data['userId'] = userId;
     final url = Uri.parse('$baseApiUrl/platform-assign');
-    print('CREATE PLATFORM ASSIGNMENT API CALLING: $url WITH BODY: $data');
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(data),
-    );
-    
-    print('CREATE PLATFORM ASSIGNMENT API STATUS: ${response.statusCode}');
-    print('CREATE PLATFORM ASSIGNMENT API BODY: ${response.body}');
-    
+    final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: json.encode(data));
     if (response.statusCode == 201 || response.statusCode == 200) {
       return BusinessResponseModel.fromJson(json.decode(response.body));
     } else {
@@ -191,16 +129,7 @@ class PlatformRepository {
   
   Future<void> deletePlatformAssignment(String id) async {
     final url = Uri.parse('$baseApiUrl/platform-assign/$id');
-    print('DELETE PLATFORM ASSIGNMENT API CALLING: $url');
-    final response = await http.delete(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'userId': userId}),
-    );
-    
-    print('DELETE PLATFORM ASSIGNMENT API STATUS: ${response.statusCode}');
-    print('DELETE PLATFORM ASSIGNMENT API BODY: ${response.body}');
-    
+    final response = await http.delete(url, headers: {'Content-Type': 'application/json'}, body: json.encode({'userId': userId}));
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to delete platform assignment');
     }

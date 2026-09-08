@@ -17,6 +17,7 @@ import 'package:va_business/features/store/presentation/providers/store_provider
 import 'package:va_business/features/business/presentation/screens/create_propagator_screen.dart';
 import 'package:va_business/features/business/presentation/screens/create_partner_screen.dart';
 import 'package:va_business/features/business/presentation/screens/create_supplier_screen.dart';
+import 'package:va_business/features/business/presentation/screens/supplier_list_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -567,6 +568,28 @@ class _AppDrawer extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const StoreSetupScreen()),
+                    );
+                  },
+                ),
+                _buildDrawerItem(
+                  Icons.business, 
+                  'Suppliers',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const SupplierListScreen()),
+                    );
+                  },
+                ),
+                _buildDrawerItem(
+                  Icons.add_circle_outline, 
+                  'Add Supplier',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const CreateSupplierScreen()),
                     );
                   },
                 ),
