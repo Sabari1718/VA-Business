@@ -2,25 +2,29 @@ class CategoryModel {
   final int id;
   final String name;
   final List<CategoryModel>? secondaryCategories;
+  final String? parentName;
 
   CategoryModel({
     required this.id,
     required this.name,
     this.secondaryCategories,
+    this.parentName,
   });
 
-  factory CategoryModel.fromJson(Map<String, dynamic> json) {
+  factory CategoryModel.fromJson(Map<String, dynamic> json, {String? parentName}) {
     List<CategoryModel>? secondaryCats;
+    final currentName = json['name'] ?? '';
     if (json['secondaryCategories'] != null && json['secondaryCategories'] is List) {
       secondaryCats = (json['secondaryCategories'] as List)
-          .map((e) => CategoryModel.fromJson(e))
+          .map((e) => CategoryModel.fromJson(e, parentName: currentName))
           .toList();
     }
 
     return CategoryModel(
       id: json['id'] ?? 0,
-      name: json['name'] ?? '',
+      name: currentName,
       secondaryCategories: secondaryCats,
+      parentName: parentName,
     );
   }
 

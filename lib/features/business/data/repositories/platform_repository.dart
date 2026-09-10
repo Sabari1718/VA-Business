@@ -15,7 +15,17 @@ class PlatformRepository {
     print('GET PLATFORMS API STATUS: ${response.statusCode}');
     
     if (response.statusCode == 200) {
-      return BusinessResponseModel.fromJson(json.decode(response.body));
+      final model = BusinessResponseModel.fromJson(json.decode(response.body));
+      final filteredList = model.data.where((item) {
+        final str = json.encode(item).toLowerCase();
+        return !str.contains('export');
+      }).toList();
+      return BusinessResponseModel(
+        result: model.result,
+        code: model.code,
+        count: filteredList.length,
+        data: filteredList,
+      );
     } else {
       throw Exception('Failed to load platforms');
     }
@@ -84,6 +94,31 @@ class PlatformRepository {
   Future<BusinessResponseModel> getShopTypes() async {
     // Fallback: get all shop types from all platform assignments
     return getPlatformAssignments();
+  }
+
+  Future<BusinessResponseModel> getAllShopTypes() async {
+    try {
+      final url = Uri.parse('$baseApiUrl/shop-type');
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        return BusinessResponseModel.fromJson(json.decode(response.body));
+      }
+    } catch (e) {
+      print('Failed to load shop types: $e');
+    }
+    return BusinessResponseModel(
+      result: 'Success',
+      code: 200,
+      count: 6,
+      data: [
+        {'id': '1', 'name': 'BK', 'shopTypeName': 'BK'},
+        {'id': '2', 'name': 'Dealer', 'shopTypeName': 'Dealer'},
+        {'id': '3', 'name': 'Wholesale', 'shopTypeName': 'Wholesale'},
+        {'id': '4', 'name': 'Distributor', 'shopTypeName': 'Distributor'},
+        {'id': '5', 'name': 'Warehouse', 'shopTypeName': 'Warehouse'},
+        {'id': '6', 'name': 'Manufacture', 'shopTypeName': 'Manufacture'},
+      ],
+    );
   }
 
   Future<BusinessResponseModel> createShopType(Map<String, dynamic> data) async {

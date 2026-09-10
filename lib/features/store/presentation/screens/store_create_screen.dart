@@ -2,14 +2,36 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:va_business/core/theme/app_colors.dart';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../providers/store_providers.dart';
 import '../../data/models/store_model.dart';
-import '../../../business/presentation/providers/business_providers.dart';
-import '../../../business/presentation/providers/platform_providers.dart';
-import '../../../business/data/models/business_response_model.dart';
+import 'package:va_business/features/business/presentation/providers/business_providers.dart';
+import 'package:va_business/core/utils/safe_base64_decode.dart';
+
+class SelectableBusiness {
+  final String id;
+  final String name;
+  final String category;
+  final String categoryKey;
+  final String phone;
+  final String email;
+  final String website;
+  final String? logo;
+  final Map<String, dynamic> raw;
+
+  SelectableBusiness({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.categoryKey,
+    required this.phone,
+    required this.email,
+    required this.website,
+    this.logo,
+    required this.raw,
+  });
+}
 
 class StoreCreateScreen extends ConsumerStatefulWidget {
   final StoreModel? store;
@@ -22,16 +44,21 @@ class StoreCreateScreen extends ConsumerStatefulWidget {
 class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
   int _currentStep = 1;
   final TextEditingController _storeNameController = TextEditingController();
-  final TextEditingController _customerCareNameController = TextEditingController();
   final TextEditingController _customerCarePhoneController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _websiteController = TextEditingController();
+  
+  final TextEditingController _customerCareNameController = TextEditingController();
   final TextEditingController _altContactNameController = TextEditingController();
   final TextEditingController _altPhoneController = TextEditingController();
+  
   final TextEditingController _countryController = TextEditingController(text: 'India');
-  final TextEditingController _stateController = TextEditingController();
-  final TextEditingController _districtController = TextEditingController();
-  final TextEditingController _talukController = TextEditingController();
-  final TextEditingController _cityVillageController = TextEditingController();
-  final TextEditingController _pincodeController = TextEditingController();
+  final TextEditingController _stateController = TextEditingController(text: 'Tamil Nadu');
+  final TextEditingController _districtController = TextEditingController(text: 'Chennai');
+  final TextEditingController _talukController = TextEditingController(text: 'Guindy');
+  final TextEditingController _cityVillageController = TextEditingController(text: 'Chennai City');
+  final TextEditingController _pincodeController = TextEditingController(text: '600020');
+  
   final TextEditingController _openingTimeController = TextEditingController(text: '09:00 AM');
   final TextEditingController _closingTimeController = TextEditingController(text: '09:00 PM');
   
@@ -40,17 +67,87 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
   bool _showStep1Errors = false;
   bool _showStep2Errors = false;
   bool _showStep3Errors = false;
-  bool _showStep4Errors = false;
-  bool _showStep5Errors = false;
   
-  // Step 1: Business Selection State
-  String? _selectedBusinessType;
-  String? _selectedBusinessId;
-  
-  // Step 2: Platform Configuration State
-  String? _selectedPlatformId;
-  String? _selectedPlatformModuleId;
-  String? _selectedShopTypeId;
+  String? _selectedBranchModel = 'Single Branch (Automatic Single Setup)';
+  SelectableBusiness? _selectedBusiness;
+  bool _hasAutoFilled = false;
+
+  // Configuration State
+  final List<String> _workingDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  final Set<String> _selectedWorkingDays = {'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'};
+  final Map<String, TextEditingController> _weeklyOffNotesControllers = {};
+
+  final List<String> _paymentMethods = ['Cash on Delivery', 'Credit / Debit Card', 'UPI / Google Pay', 'Net Banking'];
+  final List<String> _languages = ['English', 'Tamil', 'Hindi', 'Spanish'];
+
+  @override
+  void initState() {
+    super.initState();
+    for (var day in _workingDays) {
+      _weeklyOffNotesControllers[day] = TextEditingController(text: '$day weekly off');
+    }
+    
+    if (widget.store != null) {
+      final s = widget.store!;
+      _storeNameController.text = s.storeName;
+      _selectedBranchModel = s.branchManagementModel.isNotEmpty ? s.branchManagementModel : 'Single Branch (Automatic Single Setup)';
+      _customerCareNameController.text = s.customerCareName.isNotEmpty ? s.customerCareName : 'Sabari';
+      _customerCarePhoneController.text = s.customerCarePhone;
+      _altContactNameController.text = s.altContactName;
+      _altPhoneController.text = s.altPhone;
+      _countryController.text = s.country.isNotEmpty ? s.country : 'India';
+      _stateController.text = s.state;
+      _districtController.text = s.district;
+      _talukController.text = s.taluk;
+      _cityVillageController.text = s.cityVillage;
+      _pincodeController.text = s.pincode;
+      _openingTimeController.text = s.openingTime.isNotEmpty ? s.openingTime : '09:00 AM';
+      _closingTimeController.text = s.closingTime.isNotEmpty ? s.closingTime : '09:00 PM';
+      
+      if (s.storeLogo.isNotEmpty) {
+        _storeLogoBase64 = s.storeLogo;
+      }
+      
+      if (s.workingDays.isNotEmpty) {
+        _selectedWorkingDays.clear();
+        _selectedWorkingDays.addAll(s.workingDays.split(', '));
+      }
+      
+      if (s.paymentMethods.isNotEmpty) {
+        _paymentMethods.clear();
+        _paymentMethods.addAll(s.paymentMethods.split(', '));
+      }
+      
+      if (s.supportedLanguages.isNotEmpty) {
+        _languages.clear();
+        _languages.addAll(s.supportedLanguages.split(', '));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _storeNameController.dispose();
+    _customerCarePhoneController.dispose();
+    _emailController.dispose();
+    _websiteController.dispose();
+    _customerCareNameController.dispose();
+    _altContactNameController.dispose();
+    _altPhoneController.dispose();
+    _countryController.dispose();
+    _stateController.dispose();
+    _districtController.dispose();
+    _talukController.dispose();
+    _cityVillageController.dispose();
+    _pincodeController.dispose();
+    _openingTimeController.dispose();
+    _closingTimeController.dispose();
+    for (var controller in _weeklyOffNotesControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
@@ -62,8 +159,279 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
       });
     }
   }
-  
-    Future<void> _submitForm() async {
+
+  void _selectBusiness(SelectableBusiness b, {bool forceFill = true}) {
+    setState(() {
+      _selectedBusiness = b;
+      if (forceFill) {
+        if (b.name.isNotEmpty) {
+          _storeNameController.text = b.name;
+          _customerCareNameController.text = b.name;
+        }
+        if (b.phone.isNotEmpty) {
+          _customerCarePhoneController.text = b.phone;
+        }
+        if (b.email.isNotEmpty) {
+          _emailController.text = b.email;
+        }
+        if (b.website.isNotEmpty) {
+          _websiteController.text = b.website;
+        }
+        if (b.logo != null && b.logo!.isNotEmpty) {
+          _storeLogoBase64 = b.logo;
+        }
+      }
+    });
+  }
+
+  Widget _buildStoreLogoPreview() {
+    if (_storeLogoBase64 == null || _storeLogoBase64!.isEmpty) {
+      return _buildDottedUploadBox(
+        'Click to upload, or drag & drop store image here',
+        'Tip: You can also copy & paste (Ctrl + V) any image directly',
+      );
+    }
+
+    if (_storeLogoBase64!.startsWith('http')) {
+      return Container(
+        height: 120,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          image: DecorationImage(
+            image: NetworkImage(_storeLogoBase64!),
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    }
+
+    final bytes = safeBase64Decode(_storeLogoBase64!);
+    if (bytes.isNotEmpty) {
+      return Container(
+        height: 120,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          image: DecorationImage(
+            image: MemoryImage(bytes),
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    }
+
+    return _buildDottedUploadBox(
+      'Click to upload, or drag & drop store image here',
+      'Tip: You can also copy & paste (Ctrl + V) any image directly',
+    );
+  }
+
+  Widget _buildSwitchBusinessPill(List<SelectableBusiness> allBusinesses) {
+    final name = _selectedBusiness?.name ?? 'Select Business';
+    return InkWell(
+      onTap: allBusinesses.isEmpty
+          ? null
+          : () => _showSwitchBusinessDialog(allBusinesses),
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEEF2FF),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.business_rounded, size: 13, color: Color(0xFF6366F1)),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                'Business: $name',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  color: const Color(0xFF6366F1),
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: Color(0xFF6366F1)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSwitchBusinessDialog(List<SelectableBusiness> allBusinesses) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: Colors.white,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Container(
+            width: 380,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Switch Business',
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF1E293B),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2FF),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '${allBusinesses.length} Available',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF6366F1),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: allBusinesses.length,
+                    separatorBuilder: (context, index) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final b = allBusinesses[index];
+                      final isSelected = _selectedBusiness?.id == b.id &&
+                          _selectedBusiness?.categoryKey == b.categoryKey;
+
+                      Color catColor;
+                      IconData catIcon;
+                      if (b.categoryKey == 'partner') {
+                        catColor = const Color(0xFFF97316);
+                        catIcon = Icons.handshake_outlined;
+                      } else if (b.categoryKey == 'supplier') {
+                        catColor = const Color(0xFF10B981);
+                        catIcon = Icons.local_shipping_outlined;
+                      } else {
+                        catColor = const Color(0xFF4C8DFB);
+                        catIcon = Icons.storefront_rounded;
+                      }
+
+                      return InkWell(
+                        onTap: () {
+                          Navigator.pop(context);
+                          _selectBusiness(b, forceFill: true);
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isSelected ? const Color(0xFFF5F7FF) : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isSelected ? const Color(0xFF6366F1) : Colors.grey.shade200,
+                              width: isSelected ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: catColor.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(catIcon, color: catColor, size: 20),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      b.name,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: isSelected ? const Color(0xFF6366F1) : const Color(0xFF1E293B),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      b.category,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        color: Colors.black45,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isSelected)
+                                const Icon(Icons.check_rounded, color: Color(0xFF6366F1), size: 20),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _nextStep() {
+    setState(() {
+      if (_currentStep == 1) {
+        _showStep1Errors = true;
+        if (_storeNameController.text.trim().isNotEmpty &&
+            _customerCarePhoneController.text.trim().isNotEmpty) {
+          _currentStep++;
+        }
+      } else if (_currentStep == 2) {
+        _showStep2Errors = true;
+        if (_countryController.text.trim().isNotEmpty &&
+            _stateController.text.trim().isNotEmpty &&
+            _districtController.text.trim().isNotEmpty &&
+            _talukController.text.trim().isNotEmpty &&
+            _cityVillageController.text.trim().isNotEmpty &&
+            _pincodeController.text.trim().isNotEmpty) {
+          _currentStep++;
+        }
+      }
+    });
+  }
+
+  void _previousStep() {
+    if (_currentStep > 1) {
+      setState(() => _currentStep--);
+    }
+  }
+
+  Future<void> _submitForm() async {
     setState(() {
       _showStep1Errors = true;
       _showStep2Errors = true;
@@ -71,30 +439,27 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
     });
     
     if (_storeNameController.text.trim().isEmpty ||
-        _selectedBranchModel == null ||
-        _customerCareNameController.text.trim().isEmpty ||
         _customerCarePhoneController.text.trim().isEmpty ||
         _countryController.text.trim().isEmpty ||
         _stateController.text.trim().isEmpty ||
         _districtController.text.trim().isEmpty ||
         _talukController.text.trim().isEmpty ||
         _cityVillageController.text.trim().isEmpty ||
-        _pincodeController.text.trim().isEmpty ||
-        _openingTimeController.text.trim().isEmpty ||
-        _closingTimeController.text.trim().isEmpty) {
+        _pincodeController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all required fields.')));
       return;
     }
 
-    
     setState(() => _isLoading = true);
     try {
       final payload = StoreModel(
         id: widget.store?.id,
         userId: widget.store?.userId,
         storeName: _storeNameController.text.trim(),
-        branchManagementModel: _selectedBranchModel ?? '',
-        customerCareName: _customerCareNameController.text.trim(),
+        branchManagementModel: _selectedBranchModel ?? 'Single Branch (Automatic Single Setup)',
+        customerCareName: _customerCareNameController.text.trim().isNotEmpty
+            ? _customerCareNameController.text.trim()
+            : (_selectedBusiness?.name ?? 'Sabari'),
         customerCarePhone: _customerCarePhoneController.text.trim(),
         altContactName: _altContactNameController.text.trim(),
         altPhone: _altPhoneController.text.trim(),
@@ -110,10 +475,10 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
         holidayNotes: _weeklyOffNotesControllers.entries.map((e) => "${e.key}: ${e.value.text}").join('; '),
         paymentMethods: _paymentMethods.join(', '),
         supportedLanguages: _languages.join(', '),
-        businessId: _selectedBusinessId ?? '1',
-        platformId: _selectedPlatformId ?? '1',
-        shopType: _selectedShopTypeId,
-        platformModule: _selectedPlatformModuleId,
+        businessId: _selectedBusiness?.id ?? (widget.store?.businessId.isNotEmpty == true ? widget.store!.businessId : '1'),
+        platformId: widget.store?.platformId.isNotEmpty == true ? widget.store!.platformId : '1',
+        shopType: widget.store?.shopType,
+        platformModule: widget.store?.platformModule,
         status: widget.store?.status ?? 'Active',
         storeLogo: _storeLogoBase64 ?? '',
       );
@@ -142,116 +507,85 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
     }
   }
 
-  String? _selectedBranchModel;
-
-  // Step 3 State
-  final List<String> _workingDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  final Set<String> _selectedWorkingDays = {'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'};
-  final Map<String, TextEditingController> _weeklyOffNotesControllers = {};
-
-  final List<String> _paymentMethods = ['Cash on Delivery'];
-  final List<String> _languages = ['English', 'Tamil', 'Hindi'];
-
   @override
-  void initState() {
-    super.initState();
-    for (var day in _workingDays) {
-      _weeklyOffNotesControllers[day] = TextEditingController(text: '$day weekly off');
-    }
-    
-    if (widget.store != null) {
-      final s = widget.store!;
-      _selectedBusinessId = s.businessId.isNotEmpty ? s.businessId : null;
-      _selectedPlatformId = s.platformId.isNotEmpty ? s.platformId : null;
-      _selectedShopTypeId = s.shopType;
-      _selectedPlatformModuleId = s.platformModule;
-      
-      _storeNameController.text = s.storeName;
-      _selectedBranchModel = s.branchManagementModel;
-      _customerCareNameController.text = s.customerCareName;
-      _customerCarePhoneController.text = s.customerCarePhone;
-      _altContactNameController.text = s.altContactName;
-      _altPhoneController.text = s.altPhone;
-      _countryController.text = s.country;
-      _stateController.text = s.state;
-      _districtController.text = s.district;
-      _talukController.text = s.taluk;
-      _cityVillageController.text = s.cityVillage;
-      _openingTimeController.text = s.openingTime;
-      _closingTimeController.text = s.closingTime;
-      
-      if (s.storeLogo.isNotEmpty) {
-        _storeLogoBase64 = s.storeLogo;
-      }
-      
-      if (s.workingDays.isNotEmpty) {
-        _selectedWorkingDays.clear();
-        _selectedWorkingDays.addAll(s.workingDays.split(', '));
-      }
-      
-      if (s.paymentMethods.isNotEmpty) {
-        _paymentMethods.clear();
-        _paymentMethods.addAll(s.paymentMethods.split(', '));
-      }
-      
-      if (s.supportedLanguages.isNotEmpty) {
-        _languages.clear();
-        _languages.addAll(s.supportedLanguages.split(', '));
-      }
-    }
-  }
+  Widget build(BuildContext context) {
+    final propagatorAsync = ref.watch(propagatorBusinessProvider);
+    final partnerAsync = ref.watch(partnerBusinessProvider);
+    final supplierAsync = ref.watch(supplierBusinessProvider);
 
-  @override
-  void dispose() {
-    for (var controller in _weeklyOffNotesControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
+    final List<SelectableBusiness> allBusinesses = [];
 
-  void _nextStep() {
-    setState(() {
-      if (_currentStep == 1) {
-        _showStep1Errors = true;
-        if (_selectedBusinessType != null && _selectedBusinessId != null) {
-          _currentStep++;
-        }
-      } else if (_currentStep == 2) {
-        _showStep2Errors = true;
-        if (_selectedPlatformId != null && _selectedPlatformModuleId != null && _selectedShopTypeId != null) {
-          _currentStep++;
-        }
-      } else if (_currentStep == 3) {
-        _showStep3Errors = true;
-        if (_storeNameController.text.trim().isNotEmpty &&
-            _selectedBranchModel != null &&
-            _customerCareNameController.text.trim().isNotEmpty &&
-            _customerCarePhoneController.text.trim().isNotEmpty) {
-          _currentStep++;
-        }
-      } else if (_currentStep == 4) {
-        _showStep4Errors = true;
-        if (_countryController.text.trim().isNotEmpty &&
-            _stateController.text.trim().isNotEmpty &&
-            _districtController.text.trim().isNotEmpty &&
-            _talukController.text.trim().isNotEmpty &&
-            _cityVillageController.text.trim().isNotEmpty &&
-            _pincodeController.text.trim().isNotEmpty) {
-          _currentStep++;
+    propagatorAsync.whenData((resp) {
+      for (var item in resp.data) {
+        if (item is Map) {
+          allBusinesses.add(SelectableBusiness(
+            id: item['id']?.toString() ?? '',
+            name: item['businessName'] ?? item['name'] ?? '',
+            category: 'Propagator Business',
+            categoryKey: 'propagator',
+            phone: item['businessPhone'] ?? item['phone'] ?? '',
+            email: item['businessEmail'] ?? item['email'] ?? '',
+            website: item['website'] ?? '',
+            logo: item['companyLogo'] ?? item['logo'],
+            raw: Map<String, dynamic>.from(item),
+          ));
         }
       }
     });
-  }
 
+    partnerAsync.whenData((resp) {
+      for (var item in resp.data) {
+        if (item is Map) {
+          allBusinesses.add(SelectableBusiness(
+            id: item['id']?.toString() ?? '',
+            name: item['businessName'] ?? item['name'] ?? '',
+            category: 'Partner Business',
+            categoryKey: 'partner',
+            phone: item['businessPhone'] ?? item['phone'] ?? '',
+            email: item['businessEmail'] ?? item['email'] ?? '',
+            website: item['website'] ?? '',
+            logo: item['companyLogo'] ?? item['logo'],
+            raw: Map<String, dynamic>.from(item),
+          ));
+        }
+      }
+    });
 
-  void _previousStep() {
-    if (_currentStep > 1) {
-      setState(() => _currentStep--);
+    supplierAsync.whenData((resp) {
+      for (var item in resp.data) {
+        if (item is Map) {
+          allBusinesses.add(SelectableBusiness(
+            id: item['id']?.toString() ?? '',
+            name: item['businessName'] ?? item['name'] ?? '',
+            category: 'Supplier Business',
+            categoryKey: 'supplier',
+            phone: item['businessPhone'] ?? item['phone'] ?? '',
+            email: item['businessEmail'] ?? item['email'] ?? '',
+            website: item['website'] ?? '',
+            logo: item['companyLogo'] ?? item['logo'] ?? item['companyLogoPath'],
+            raw: Map<String, dynamic>.from(item),
+          ));
+        }
+      }
+    });
+
+    if (!_hasAutoFilled && allBusinesses.isNotEmpty) {
+      _hasAutoFilled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        SelectableBusiness? initial;
+        if (widget.store != null && widget.store!.businessId.isNotEmpty) {
+          initial = allBusinesses.firstWhere(
+            (b) => b.id == widget.store!.businessId,
+            orElse: () => allBusinesses.first,
+          );
+        } else {
+          initial = allBusinesses.first;
+        }
+        _selectBusiness(initial, forceFill: widget.store == null);
+      });
     }
-  }
 
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FE),
       appBar: AppBar(
@@ -305,7 +639,7 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
               ),
               const SizedBox(height: 32),
 
-              // Custom Stepper
+              // Custom Stepper (3 Steps matching web)
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -316,11 +650,9 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      _buildStepTab(1, 'Business', Icons.business),
-                      _buildStepTab(2, 'Platform', Icons.devices),
-                      _buildStepTab(3, 'Store Info', Icons.store_outlined),
-                      _buildStepTab(4, 'Address', Icons.location_on_outlined),
-                      _buildStepTab(5, 'Config', Icons.tune_outlined),
+                      _buildStepTab(1, 'Store Information', Icons.store_outlined, _currentStep >= 1),
+                      _buildStepTab(2, 'Address Details', Icons.location_on_outlined, _currentStep >= 2),
+                      _buildStepTab(3, 'Store Configuration', Icons.tune_outlined, _currentStep >= 3),
                     ],
                   ),
                 ),
@@ -328,11 +660,9 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
               const SizedBox(height: 24),
 
               // Step Content
-              if (_currentStep == 1) _buildStep1(),
+              if (_currentStep == 1) _buildStep1(allBusinesses),
               if (_currentStep == 2) _buildStep2(),
               if (_currentStep == 3) _buildStep3(),
-              if (_currentStep == 4) _buildStep4(),
-              if (_currentStep == 5) _buildStep5(),
             ],
           ),
         ),
@@ -340,23 +670,33 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
     );
   }
 
-  Widget _buildStepTab(int step, String title, IconData icon) {
+  Widget _buildStepTab(int step, String title, IconData icon, bool isCompletedOrActive) {
     final isActive = _currentStep == step;
-    return Expanded(
+    return SizedBox(
+      width: 180,
       child: GestureDetector(
         onTap: () {
           setState(() => _currentStep = step);
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
           decoration: BoxDecoration(
-            color: isActive ? const Color(0xFF6366F1) : Colors.transparent, // Purple-blue from screenshot
+            color: isActive ? const Color(0xFF6366F1) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: isActive ? Colors.white : Colors.black54, size: 18),
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: isActive ? Colors.white : (isCompletedOrActive ? const Color(0xFF10B981) : Colors.grey.shade300),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text('$step', style: GoogleFonts.poppins(color: isActive ? const Color(0xFF6366F1) : Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -377,275 +717,10 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
     );
   }
 
-  // ===================== STEP 1: Business Selection =====================
-  Widget _buildStep1() {
+  // ===================== STEP 1: Store Information =====================
+  Widget _buildStep1(List<SelectableBusiness> allBusinesses) {
     return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade100),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(color: Color(0xFF4C8DFB), shape: BoxShape.circle),
-                child: const Icon(Icons.business, color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('1. Business Selection', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    Text('Select the type of business and register your store under it.', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          
-          _buildResponsiveRow(
-            _buildDropdownWithSub(
-              'Select Business Type *',
-              'Select Business Type',
-              'Choose your business category',
-              ['Partner Business', 'Supplier Business', 'Propagator'],
-              _selectedBusinessType,
-              (val) {
-                setState(() {
-                  _selectedBusinessType = val;
-                  _selectedBusinessId = null; // Reset business ID on type change
-                });
-              },
-              errorText: _showStep1Errors && _selectedBusinessType == null ? 'Business Type is required.' : null,
-            ),
-            _buildBusinessDropdown(),
-          ),
-          const SizedBox(height: 40),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              ElevatedButton(
-                onPressed: _nextStep,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF6366F1),
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text('Next Step', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBusinessDropdown() {
-    if (_selectedBusinessType == null) {
-      return _buildDropdownWithSub(
-        'Select Registered Business *',
-        'Select Business',
-        'Please select a business type first',
-        [],
-        null,
-        (val) {},
-      );
-    }
-
-    AsyncValue businessData;
-    if (_selectedBusinessType == 'Partner Business') {
-      businessData = ref.watch(partnerBusinessProvider);
-    } else if (_selectedBusinessType == 'Supplier Business') {
-      businessData = ref.watch(supplierBusinessProvider);
-    } else {
-      businessData = ref.watch(propagatorBusinessProvider);
-    }
-
-    return businessData.when(
-      loading: () => const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1))),
-      error: (err, stack) => Text('Error loading businesses: $err', style: const TextStyle(color: Colors.red)),
-      data: (response) {
-        final List<dynamic> list = response.data;
-        if (list.isEmpty) {
-          return _buildDropdownWithSub(
-            'Select Registered Business *',
-            'No Businesses Found',
-            'No businesses found for this type',
-            [],
-            null,
-            (val) {},
-          );
-        }
-
-        // Mapping id to Name
-        final items = list.map((e) {
-          final id = e['id'].toString();
-          final name = e['partnerName'] ?? e['businessName'] ?? 'Unknown Business';
-          return DropdownMenuItem<String>(
-            value: id,
-            child: Text(name, style: GoogleFonts.poppins(fontSize: 13, color: Colors.black87)),
-          );
-        }).toList();
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildLabel('Select Registered Business *'),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: _selectedBusinessId,
-              hint: Text('Select Business', style: GoogleFonts.poppins(color: Colors.black38, fontSize: 13)),
-              items: items,
-              onChanged: (val) => setState(() => _selectedBusinessId = val),
-              decoration: InputDecoration(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-                errorText: _showStep1Errors && _selectedBusinessId == null ? 'Business is required.' : null,
-              ),
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
-            ),
-            const SizedBox(height: 4),
-            Text('Select the specific business to link this store', style: GoogleFonts.poppins(fontSize: 10, color: Colors.black45)),
-          ],
-        );
-      },
-    );
-  }
-
-  // ===================== STEP 2: Platform Configuration =====================
-  Widget _buildStep2() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade100),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(color: Color(0xFF4C8DFB), shape: BoxShape.circle),
-                child: const Icon(Icons.devices, color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('2. Platform Configuration', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    Text('Configure your e-commerce platform and shop type.', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          
-          _buildResponsiveRow(
-            _buildApiDropdown('Select E-Commerce Platform *', 'Select Platform', 'Choose your platform', platformsProvider, _selectedPlatformId, (val) => setState(() => _selectedPlatformId = val), 'platformName', _showStep2Errors && _selectedPlatformId == null ? 'Platform is required' : null),
-            _buildApiDropdown('Select Platform Module *', 'Select Module', 'Choose your platform module', platformAssignmentsProvider, _selectedPlatformModuleId, (val) => setState(() => _selectedPlatformModuleId = val), 'moduleName', _showStep2Errors && _selectedPlatformModuleId == null ? 'Platform Module is required' : null),
-            _buildApiDropdown('Select Shop Type *', 'Select Shop Type', 'Choose your shop type', shopTypesProvider, _selectedShopTypeId, (val) => setState(() => _selectedShopTypeId = val), 'shopTypeName', _showStep2Errors && _selectedShopTypeId == null ? 'Shop Type is required' : null),
-          ),
-          
-          const SizedBox(height: 40),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              OutlinedButton(
-                onPressed: _previousStep,
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.grey.shade300),
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text('Previous', style: GoogleFonts.poppins(color: Colors.black87, fontWeight: FontWeight.w600)),
-              ),
-              ElevatedButton(
-                onPressed: _nextStep,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF6366F1),
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text('Next Step', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildApiDropdown(String label, String hint, String sub, FutureProvider<BusinessResponseModel> provider, String? selectedValue, Function(String?) onChanged, String nameKey, String? errorText) {
-    final dataAsync = ref.watch(provider);
-    
-    return dataAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1))),
-      error: (err, stack) => Text('Error: $err', style: const TextStyle(color: Colors.red)),
-      data: (response) {
-        final List<dynamic> list = response.data;
-        if (list.isEmpty) {
-          return _buildDropdownWithSub(label, 'No Items Found', sub, [], null, (val) {});
-        }
-
-        final items = list.map((e) {
-          final id = e['id'].toString();
-          // Fallback fields in case nameKey isn't right
-          final name = e[nameKey] ?? e['name'] ?? e['title'] ?? 'Unknown';
-          return DropdownMenuItem<String>(
-            value: id,
-            child: Text(name, style: GoogleFonts.poppins(fontSize: 13, color: Colors.black87)),
-          );
-        }).toList();
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildLabel(label),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: selectedValue,
-              hint: Text(hint, style: GoogleFonts.poppins(color: Colors.black38, fontSize: 13)),
-              items: items,
-              onChanged: onChanged,
-              decoration: InputDecoration(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-                errorText: errorText,
-              ),
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
-            ),
-            const SizedBox(height: 4),
-            Text(sub, style: GoogleFonts.poppins(fontSize: 10, color: Colors.black45)),
-          ],
-        );
-      }
-    );
-  }
-
-  // ===================== STEP 3: Store Information =====================
-  Widget _buildStep3() {
-    return Container(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -670,13 +745,13 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Store Details', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    Text('Manage your store identity, branch model, and customer care contact details', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
+                    Text('Manage your store identity and contact details', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
           
           Wrap(
             alignment: WrapAlignment.spaceBetween,
@@ -687,39 +762,61 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          GestureDetector(onTap: _pickImage, child: _storeLogoBase64 != null ? Container(height: 120, width: double.infinity, decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), image: DecorationImage(image: MemoryImage(base64Decode(_storeLogoBase64!.split(',')[1])), fit: BoxFit.cover))) : _buildDottedUploadBox('Click to upload, or drag & drop store image here', 'Tip: You can also copy & paste (Ctrl + V) any image directly')),
-          const SizedBox(height: 24),
+          GestureDetector(
+            onTap: _pickImage,
+            child: _buildStoreLogoPreview(),
+          ),
+          const SizedBox(height: 20),
           
-          _buildResponsiveRow(
-            _buildTextFieldWithSub('Store Name / Store Title *', 'Enter store name', 'Enter official storefront or business trading title', controller: _storeNameController, errorText: _showStep3Errors && _storeNameController.text.trim().isEmpty ? 'Store Name is required.' : null),
-            _buildDropdownWithSub('Branch Management Model *', 'Single Branch (Automatic Single Setup)', 'Select branch operation and management model', ['Single Branch (Automatic Single Setup)', 'Multiple Branch'], _selectedBranchModel, (val) => setState(() => _selectedBranchModel = val), errorText: _showStep3Errors && _selectedBranchModel == null ? 'Branch Management Model is required.' : null),
-          ),
-          const SizedBox(height: 24),
-          
-          _buildResponsiveRow(
-            _buildTextFieldWithSub('Customer Care Contact Name *', 'Enter customer care contact name', 'Enter customer care or support contact name', controller: _customerCareNameController, errorText: _showStep3Errors && _customerCareNameController.text.trim().isEmpty ? 'Customer Care Contact Name is required.' : null),
-            _buildTextFieldWithSub('Customer Care Phone Number *', 'Enter customer care phone number', 'Enter customer care or support phone number', controller: _customerCarePhoneController, errorText: _showStep3Errors && _customerCarePhoneController.text.trim().isEmpty ? 'Customer Care Phone Number is required.' : null),
-          ),
-          const SizedBox(height: 24),
-
-          _buildResponsiveRow(
-            _buildTextFieldWithSub('Alternate Contact Name', 'Enter alternate contact name', 'Enter alternate or secondary contact name', controller: _altContactNameController),
-            _buildTextFieldWithSub('Alternate Phone Number', 'Enter alternate phone number', 'Enter alternate or secondary phone number', controller: _altPhoneController),
-          ),
-
-          const SizedBox(height: 40),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              OutlinedButton(
-                onPressed: _previousStep,
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.grey.shade300),
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text('Previous', style: GoogleFonts.poppins(color: Colors.black87, fontWeight: FontWeight.w600)),
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _buildLabel('Store Name / Store Title *'),
+                  _buildSwitchBusinessPill(allBusinesses),
+                ],
               ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _storeNameController,
+                decoration: InputDecoration(
+                  hintText: 'Enter store name',
+                  hintStyle: GoogleFonts.poppins(color: Colors.black38, fontSize: 13),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  errorText: _showStep1Errors && _storeNameController.text.trim().isEmpty ? 'Store Name is required.' : null,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF6366F1))),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _selectedBusiness != null
+                    ? 'Auto-filled from your business "${_selectedBusiness!.name}" — you can edit if needed'
+                    : 'Enter your store or business title',
+                style: GoogleFonts.poppins(fontSize: 10, color: Colors.black45),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          
+          _buildResponsiveRow(
+            _buildTextFieldWithSub('Contact Number *', 'Enter contact phone number', 'Enter store customer care or support phone number', controller: _customerCarePhoneController, errorText: _showStep1Errors && _customerCarePhoneController.text.trim().isEmpty ? 'Contact Number is required.' : null),
+            _buildTextFieldWithSub('Email ID', 'Enter store email address', 'Enter store or business email for customer communication', controller: _emailController),
+          ),
+          const SizedBox(height: 20),
+          
+          _buildTextFieldWithSub('Website Link (optional)', 'https://www.yourstore.com', 'Enter your store or business website URL', controller: _websiteController),
+
+          const SizedBox(height: 32),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
               ElevatedButton(
                 onPressed: _nextStep,
                 style: ElevatedButton.styleFrom(
@@ -736,10 +833,10 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
     );
   }
 
-  // ===================== STEP 4: Address Details =====================
-  Widget _buildStep4() {
+  // ===================== STEP 2: Address Details =====================
+  Widget _buildStep2() {
     return Container(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -751,19 +848,439 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildResponsiveRow(
-            _buildTextField('Country *', 'India', controller: _countryController, errorText: _showStep4Errors && _countryController.text.trim().isEmpty ? 'Country is required.' : null),
-            _buildTextField('State *', 'e.g. Tamil Nadu', controller: _stateController, errorText: _showStep4Errors && _stateController.text.trim().isEmpty ? 'State is required.' : null),
-            _buildTextField('District *', 'e.g. Chennai', controller: _districtController, errorText: _showStep4Errors && _districtController.text.trim().isEmpty ? 'District is required.' : null),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(color: Color(0xFF4C8DFB), shape: BoxShape.circle),
+                child: const Icon(Icons.location_on, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Address Details', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    Text('Configure store physical location and address', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
+
           _buildResponsiveRow(
-            _buildTextField('Taluk *', 'e.g. Guindy', controller: _talukController, errorText: _showStep4Errors && _talukController.text.trim().isEmpty ? 'Taluk is required.' : null),
-            _buildTextField('City / Village *', 'e.g. Chennai City', controller: _cityVillageController, errorText: _showStep4Errors && _cityVillageController.text.trim().isEmpty ? 'City / Village is required.' : null),
-            _buildTextField('Pincode *', 'e.g. 600020', controller: _pincodeController, errorText: _showStep4Errors && _pincodeController.text.trim().isEmpty ? 'Pincode is required.' : null),
+            _buildTextField('Country *', 'India', controller: _countryController, errorText: _showStep2Errors && _countryController.text.trim().isEmpty ? 'Country is required.' : null),
+            _buildTextField('State *', 'e.g. Tamil Nadu', controller: _stateController, errorText: _showStep2Errors && _stateController.text.trim().isEmpty ? 'State is required.' : null),
+            _buildTextField('District *', 'e.g. Chennai', controller: _districtController, errorText: _showStep2Errors && _districtController.text.trim().isEmpty ? 'District is required.' : null),
+          ),
+          const SizedBox(height: 16),
+          _buildResponsiveRow(
+            _buildTextField('Taluk *', 'e.g. Guindy', controller: _talukController, errorText: _showStep2Errors && _talukController.text.trim().isEmpty ? 'Taluk is required.' : null),
+            _buildTextField('City / Village *', 'e.g. Chennai City', controller: _cityVillageController, errorText: _showStep2Errors && _cityVillageController.text.trim().isEmpty ? 'City / Village is required.' : null),
+            _buildTextField('Pincode *', 'e.g. 600020', controller: _pincodeController, errorText: _showStep2Errors && _pincodeController.text.trim().isEmpty ? 'Pincode is required.' : null),
+          ),
+          const SizedBox(height: 24),
+
+          // GPS Location Picker Box matching web screenshot (Fully mobile-optimized)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 600;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Top Search & Refresh
+                    isMobile
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.search, size: 18, color: Colors.black45),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text('Detecting GPS coordinates...', style: GoogleFonts.poppins(fontSize: 13, color: Colors.black38)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ElevatedButton.icon(
+                                onPressed: () {},
+                                icon: const Icon(Icons.refresh, size: 16, color: Colors.white),
+                                label: Text('Refresh Location', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF3B82F6),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.search, size: 18, color: Colors.black45),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text('Detecting GPS coordinates...', style: GoogleFonts.poppins(fontSize: 13, color: Colors.black38)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              ElevatedButton.icon(
+                                onPressed: () {},
+                                icon: const Icon(Icons.refresh, size: 16, color: Colors.white),
+                                label: Text('Refresh Location', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF3B82F6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ],
+                          ),
+                    const SizedBox(height: 16),
+
+                    // Warning Banner
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: isMobile
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.error_outline, size: 18, color: Color(0xFFDC2626)),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text('Location permission is required to automatically detect your business location.', style: GoogleFonts.poppins(fontSize: 12, color: Color(0xFFDC2626))),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: OutlinedButton(
+                                    onPressed: () {},
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFDC2626),
+                                      side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    ),
+                                    child: Text('Try Again', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600)),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.error_outline, size: 18, color: Color(0xFFDC2626)),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text('Location permission is required to automatically detect your business location.', style: GoogleFonts.poppins(fontSize: 12, color: Color(0xFFDC2626))),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton(
+                                  onPressed: () {},
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFFDC2626),
+                                    side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  ),
+                                  child: Text('Try Again', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Map & Details Grid/Row
+                    _buildResponsiveRow(
+                      // Left: Store Premises & Coordinates
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('sabari', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                Text('Store Premises', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
+                                Text('•', style: GoogleFonts.poppins(fontSize: 11, color: Colors.green)),
+                                Text('Verified Location', style: GoogleFonts.poppins(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w500)),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _buildMapActionButton(Icons.refresh, 'Refresh', () {}),
+                                _buildMapActionButton(Icons.check_circle, 'Confirm', () {}, isPrimary: true),
+                                _buildMapActionButton(Icons.copy_outlined, 'Copy', () {}),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEEF2FF),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.my_location, size: 12, color: Color(0xFF6366F1)),
+                                      const SizedBox(width: 4),
+                                      Text('Current Location', style: GoogleFonts.poppins(fontSize: 11, color: Color(0xFF6366F1), fontWeight: FontWeight.w600)),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.place_outlined, size: 12, color: Colors.black54),
+                                      const SizedBox(width: 4),
+                                      Text('Map Marker', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  _buildCoordItem('LATITUDE', '—'),
+                                  _buildCoordItem('LONGITUDE', '—'),
+                                  _buildCoordItem('ACCURACY', '—'),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text('ADDRESS:', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54)),
+                            const SizedBox(height: 4),
+                            Text('Address will display once GPS coordinates are acquired', style: GoogleFonts.poppins(fontSize: 12, color: Colors.black87)),
+                            const SizedBox(height: 16),
+                            isMobile
+                                ? Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        onPressed: () {},
+                                        icon: const Icon(Icons.check, size: 14, color: Colors.white),
+                                        label: Text('Confirm Location', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF6366F1),
+                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      OutlinedButton.icon(
+                                        onPressed: () {},
+                                        icon: const Icon(Icons.refresh, size: 14, color: Colors.black87),
+                                        label: Text('Refresh Location', style: GoogleFonts.poppins(fontSize: 12, color: Colors.black87)),
+                                        style: OutlinedButton.styleFrom(
+                                          side: BorderSide(color: Colors.grey.shade300),
+                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Row(
+                                    children: [
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          onPressed: () {},
+                                          icon: const Icon(Icons.check, size: 14, color: Colors.white),
+                                          label: Text('Confirm Location', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF6366F1),
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      OutlinedButton.icon(
+                                        onPressed: () {},
+                                        icon: const Icon(Icons.refresh, size: 14, color: Colors.black87),
+                                        label: Text('Refresh Location', style: GoogleFonts.poppins(fontSize: 12, color: Colors.black87)),
+                                        style: OutlinedButton.styleFrom(
+                                          side: BorderSide(color: Colors.grey.shade300),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                            
+                            // Added requested Address, GPS Coordinates, & Manual Coordinate Tuning Section below Confirm/Refresh Location
+                            const SizedBox(height: 20),
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, size: 16, color: Color(0xFF6366F1)),
+                                const SizedBox(width: 8),
+                                Text('ADDRESS', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54)),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text('Detecting address via GPS...', style: GoogleFonts.poppins(fontSize: 12, color: Colors.black87)),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                const Icon(Icons.gps_fixed, size: 16, color: Color(0xFF6366F1)),
+                                const SizedBox(width: 8),
+                                Text('GPS COORDINATES & ACCURACY', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54)),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text('—', style: GoogleFonts.poppins(fontSize: 12, color: Colors.black87)),
+                            const SizedBox(height: 20),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('MANUAL COORDINATE TUNING', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF6366F1))),
+                                  const SizedBox(height: 12),
+                                  _buildResponsiveRow(
+                                    _buildTextField('Latitude', 'e.g. 11.061861'),
+                                    _buildTextField('Longitude', 'e.g. 77.086250'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Right: Map Placeholder / GPS Acquiring Box
+                      Container(
+                        height: 280,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            margin: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF6366F1)),
+                                ),
+                                const SizedBox(height: 12),
+                                Text('Acquiring High-Accuracy GPS...', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87), textAlign: TextAlign.center),
+                                const SizedBox(height: 4),
+                                Text('Requesting fresh coordinates from device GPS', style: GoogleFonts.poppins(fontSize: 10, color: Colors.black54), textAlign: TextAlign.center),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    _buildGpsStep('1. Request GPS', true),
+                                    const Text('->', style: TextStyle(color: Colors.black38, fontSize: 10)),
+                                    _buildGpsStep('2. Receive', false),
+                                    const Text('->', style: TextStyle(color: Colors.black38, fontSize: 10)),
+                                    _buildGpsStep('3. Center', false),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
           
-          const SizedBox(height: 40),
+          const SizedBox(height: 32),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -792,18 +1309,66 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
     );
   }
 
-  // ===================== STEP 5: Store Configuration =====================
-  Widget _buildStep5() {
+  // ===================== STEP 3: Store Configuration =====================
+  Widget _buildStep3() {
     return Column(
       children: [
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey.shade100),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(color: Color(0xFF4C8DFB), shape: BoxShape.circle),
+                    child: const Icon(Icons.tune, color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Store Configuration', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        Text('Branch management model, operating hours, and preferences', style: GoogleFonts.poppins(fontSize: 11, color: Colors.black54)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              _buildResponsiveRow(
+                _buildDropdownWithSub('Branch Management Model *', 'Single Branch (Automatic Single Setup)', 'Select branch operation and management model', ['Single Branch (Automatic Single Setup)', 'Multiple Branch'], _selectedBranchModel, (val) => setState(() => _selectedBranchModel = val)),
+                _buildTextFieldWithSub('Customer Care Contact Name', 'Enter contact name', 'Customer care contact name', controller: _customerCareNameController),
+              ),
+              const SizedBox(height: 20),
+              _buildResponsiveRow(
+                _buildTextFieldWithSub('Alternate Contact Name', 'Enter alternate contact name', 'Alternate contact name', controller: _altContactNameController),
+                _buildTextFieldWithSub('Alternate Phone Number', 'Enter alternate phone number', 'Alternate phone number', controller: _altPhoneController),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
         // Operating Hours
         _buildSectionCard(
           icon: Icons.access_time,
           title: 'Store Operating Hours',
           subtitle: 'Set daily opening and closing schedule for customer visits & orders',
           child: _buildResponsiveRow(
-            _buildTextField('Opening Time *', '09:00 AM', controller: _openingTimeController, errorText: _showStep5Errors && _openingTimeController.text.trim().isEmpty ? 'Opening Time is required.' : null),
-            _buildTextField('Closing Time *', '09:00 PM', controller: _closingTimeController, errorText: _showStep5Errors && _closingTimeController.text.trim().isEmpty ? 'Closing Time is required.' : null),
+            _buildTextField('Opening Time *', '09:00 AM', controller: _openingTimeController),
+            _buildTextField('Closing Time *', '09:00 PM', controller: _closingTimeController),
           ),
         ),
         const SizedBox(height: 24),
@@ -861,7 +1426,6 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                   ),
                 );
               }),
-              Text('Specify individual weekly leave or official holiday details for unselected days', style: GoogleFonts.poppins(fontSize: 10, color: Colors.black45)),
             ],
           ),
         ),
@@ -871,15 +1435,14 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
         _buildSectionCard(
           icon: Icons.credit_card,
           title: 'Supported Payment Methods',
-          subtitle: 'Dynamically manage accepted checkout payment options (Edit & Delete supported)',
-          actionButton: _buildAddButton('+ Add Payment Method', () => _showAddMethodDialog('Add Payment Method', 'Payment Method Name *', 'e.g. Apple Pay, Crypto / Bitcoin, Bank Transfer', (val) {
+          subtitle: 'Dynamically manage accepted checkout payment options',
+          actionButton: _buildAddButton('+ Add Payment Method', () => _showAddMethodDialog('Add Payment Method', 'Payment Method Name *', 'e.g. Apple Pay, Crypto, Bank Transfer', (val) {
             setState(() => _paymentMethods.add(val));
           })),
           child: Wrap(
             spacing: 12,
             runSpacing: 12,
             children: _paymentMethods.map((method) => _buildItemChip(method, Icons.money, () {
-              // Edit
               _showAddMethodDialog('Edit Payment Method', 'Payment Method Name *', 'e.g. Apple Pay', (val) {
                 setState(() {
                   int idx = _paymentMethods.indexOf(method);
@@ -887,7 +1450,6 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                 });
               }, initialValue: method);
             }, () {
-              // Delete
               setState(() => _paymentMethods.remove(method));
             })).toList(),
           ),
@@ -898,7 +1460,7 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
         _buildSectionCard(
           icon: Icons.language,
           title: 'Supported Languages',
-          subtitle: 'Dynamically set storefront languages (Edit & Delete supported)',
+          subtitle: 'Dynamically set storefront languages',
           actionButton: _buildAddButton('+ Add Language', () => _showAddMethodDialog('Add Language', 'Language Name *', 'e.g. French, Spanish', (val) {
             setState(() => _languages.add(val));
           })),
@@ -906,7 +1468,6 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
             spacing: 12,
             runSpacing: 12,
             children: _languages.map((lang) => _buildItemChip(lang, Icons.language, () {
-              // Edit
               _showAddMethodDialog('Edit Language', 'Language Name *', 'e.g. French', (val) {
                 setState(() {
                   int idx = _languages.indexOf(lang);
@@ -914,7 +1475,6 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                 });
               }, initialValue: lang);
             }, () {
-              // Delete
               setState(() => _languages.remove(lang));
             })).toList(),
           ),
@@ -957,6 +1517,42 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
   }
 
   // ===================== Helpers =====================
+
+  Widget _buildMapActionButton(IconData icon, String label, VoidCallback onTap, {bool isPrimary = false}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isPrimary ? const Color(0xFF6366F1) : Colors.grey.shade100,
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        icon: Icon(icon, size: 18, color: isPrimary ? Colors.white : Colors.black54),
+        onPressed: onTap,
+        tooltip: label,
+      ),
+    );
+  }
+
+  Widget _buildCoordItem(String title, String val) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: GoogleFonts.poppins(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black45)),
+        const SizedBox(height: 2),
+        Text(val, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
+      ],
+    );
+  }
+
+  Widget _buildGpsStep(String text, bool isActive) {
+    return Text(
+      text,
+      style: GoogleFonts.poppins(
+        fontSize: 10,
+        fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+        color: isActive ? const Color(0xFF6366F1) : Colors.black45,
+      ),
+    );
+  }
 
   Widget _buildSectionCard({required IconData icon, required String title, required String subtitle, required Widget child, Widget? actionButton}) {
     return Container(
@@ -1089,18 +1685,9 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                     hintText: hint,
                     hintStyle: GoogleFonts.poppins(color: Colors.black38, fontSize: 13),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFF6366F1)),
-                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF6366F1))),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -1120,7 +1707,7 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
                       onPressed: () {
                         if (controller.text.trim().isNotEmpty) {
                           onAdd(controller.text.trim());
-                          Navigator.pop(context); // Close dialog explicitly
+                          Navigator.pop(context);
                         }
                       },
                       style: ElevatedButton.styleFrom(
@@ -1163,7 +1750,7 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(8),
           ),
-                    child: TextField(
+          child: TextField(
             controller: controller,
             decoration: InputDecoration(
               hintText: hint,
@@ -1171,21 +1758,11 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               errorText: errorText,
               errorStyle: GoogleFonts.poppins(color: Colors.red, fontSize: 10),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: errorText != null ? Colors.red : Colors.grey.shade200),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: errorText != null ? Colors.red : Colors.grey.shade200),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: errorText != null ? Colors.red : const Color(0xFF6366F1)),
-              ),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: errorText != null ? Colors.red : Colors.grey.shade200)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: errorText != null ? Colors.red : Colors.grey.shade200)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: errorText != null ? Colors.red : const Color(0xFF6366F1))),
             ),
           ),
-
         ),
       ],
     );
@@ -1240,7 +1817,7 @@ class _StoreCreateScreenState extends ConsumerState<StoreCreateScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300, width: 1.5, style: BorderStyle.solid), // Fallback for dotted
+        border: Border.all(color: Colors.grey.shade300, width: 1.5),
       ),
       child: Column(
         children: [

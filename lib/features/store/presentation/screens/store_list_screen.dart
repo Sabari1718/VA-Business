@@ -15,7 +15,6 @@ class StoreListScreen extends ConsumerStatefulWidget {
 }
 
 class _StoreListScreenState extends ConsumerState<StoreListScreen> {
-  String _selectedBranchFilter = 'Single Branch';
   bool _isTableView = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -76,17 +75,11 @@ class _StoreListScreenState extends ConsumerState<StoreListScreen> {
         loading: () => const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1))),
         error: (error, stack) => Center(child: Text('Error: $error', style: GoogleFonts.poppins(color: Colors.red))),
         data: (stores) {
-          final singleBranchStores = stores.where((s) => s.branchManagementModel == 'Single Branch (Automatic Single Setup)' || s.branchManagementModel == 'Single Branch').toList();
-          final multipleBranchStores = stores.where((s) => s.branchManagementModel == 'Multiple Branch').toList();
-          
           final filteredStores = stores.where((s) {
-            final matchesFilter = _selectedBranchFilter == 'Single Branch' 
-                ? (s.branchManagementModel == 'Single Branch (Automatic Single Setup)' || s.branchManagementModel == 'Single Branch')
-                : (s.branchManagementModel == 'Multiple Branch');
             final matchesSearch = s.storeName.toLowerCase().contains(_searchQuery) ||
                 s.cityVillage.toLowerCase().contains(_searchQuery) ||
                 s.customerCarePhone.toLowerCase().contains(_searchQuery);
-            return matchesFilter && matchesSearch;
+            return matchesSearch;
           }).toList();
           
           return SingleChildScrollView(
@@ -125,8 +118,6 @@ class _StoreListScreenState extends ConsumerState<StoreListScreen> {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _buildFilterButton('Single Branch', '${singleBranchStores.length}', Icons.store),
-                          _buildFilterButton('Multiple Branch', '${multipleBranchStores.length}', Icons.account_tree_outlined),
                           ElevatedButton.icon(
                             onPressed: () => _navigateToCreate(context),
                             icon: const Icon(Icons.add, size: 16, color: Colors.white),
@@ -788,39 +779,7 @@ class _StoreListScreenState extends ConsumerState<StoreListScreen> {
       },
     );
   }
-Widget _buildFilterButton(String text, String count, IconData icon) {
-    final bool isSelected = _selectedBranchFilter == text;
-    return ElevatedButton.icon(
-      onPressed: () => setState(() => _selectedBranchFilter = text),
-      icon: Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.black54),
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(text, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.black87, fontSize: 13)),
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: isSelected ? Colors.white.withOpacity(0.2) : Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              count,
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 11, color: isSelected ? Colors.white : Colors.black54),
-            ),
-          ),
-        ],
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? const Color(0xFF6366F1) : Colors.white,
-        foregroundColor: isSelected ? Colors.white : Colors.black87,
-        elevation: 0,
-        side: isSelected ? BorderSide.none : BorderSide(color: Colors.grey.shade300),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
-  }
+
 
   Widget _buildViewToggle(IconData icon, String label, bool isActive) {
     return Container(

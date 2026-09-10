@@ -29,3 +29,10 @@ final shopTypesProvider = FutureProvider<BusinessResponseModel>((ref) async {
   final repository = ref.read(platformRepositoryProvider);
   return repository.getPlatformAssignments();
 });
+
+// All shop types (from /shop-type)
+final allShopTypesProvider = FutureProvider<BusinessResponseModel>((ref) async {
+  final repository = ref.read(platformRepositoryProvider);
+  return repository.getAllShopTypes();
+});
+
