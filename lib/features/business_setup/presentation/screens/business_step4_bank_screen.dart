@@ -298,9 +298,30 @@ class _BusinessStep4BankScreenState extends ConsumerState<BusinessStep4BankScree
                           ),
                         ),
                         ElevatedButton(
-                          onPressed: () {
-                            navNotifier.navigateToStep5();
-                          },
+                          onPressed: setupState.isSubmitting
+                              ? null
+                              : () async {
+                                  setupNotifier.updateAccountHolder(_holderController.text.trim());
+                                  setupNotifier.updateBankName(_bankController.text.trim());
+                                  setupNotifier.updateBranchName(_branchController.text.trim());
+                                  setupNotifier.updateAccountNumber(_accountController.text.trim());
+                                  setupNotifier.updateConfirmAccountNumber(_confirmAccountController.text.trim());
+                                  setupNotifier.updateIfscCode(_ifscController.text.trim());
+                                  setupNotifier.updateBankAddress(_addressController.text.trim());
+
+                                  final success = await setupNotifier.submitStep4Bank();
+                                  if (!mounted) return;
+                                  if (success) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Bank account details saved to API!'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                  navNotifier.navigateToStep5();
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF2563EB),
                             foregroundColor: Colors.white,
@@ -313,9 +334,20 @@ class _BusinessStep4BankScreenState extends ConsumerState<BusinessStep4BankScree
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (setupState.isSubmitting) ...[
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Flexible(
                                 child: Text(
-                                  'Next: Company Scale & Tier',
+                                  setupState.isSubmitting ? 'Saving to API...' : 'Next: Company Scale & Tier',
                                   style: TextStyle(
                                     fontWeight: FontWeight.w700,
                                     fontSize: isMobile ? 12 : 13.5,

@@ -17,6 +17,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(Direct to Consumer)',
       'headerColor': Color(0xFF2563EB),
       'icon': Icons.storefront_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/retail_shop-DfCtgFxP.jpg',
       'illustrationIcon': Icons.shopping_cart_rounded,
       'illustrationBg': Color(0xFFEFF6FF),
       'illustrationColor': Color(0xFF2563EB),
@@ -32,6 +33,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(Physical Showroom)',
       'headerColor': Color(0xFF6366F1),
       'icon': Icons.apartment_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/showroom-0X48_RPf.jpg',
       'illustrationIcon': Icons.domain_rounded,
       'illustrationBg': Color(0xFFEEF2FF),
       'illustrationColor': Color(0xFF6366F1),
@@ -47,6 +49,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(Authorized Sales)',
       'headerColor': Color(0xFF059669),
       'icon': Icons.verified_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/dealer-DA-R5G6E.jpg',
       'illustrationIcon': Icons.handshake_rounded,
       'illustrationBg': Color(0xFFECFDF5),
       'illustrationColor': Color(0xFF059669),
@@ -62,6 +65,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(B2B Bulk Sales)',
       'headerColor': Color(0xFF7C3AED),
       'icon': Icons.inventory_2_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/wholesale-Bgtz94Mr.jpg',
       'illustrationIcon': Icons.local_shipping_rounded,
       'illustrationBg': Color(0xFFF5F3FF),
       'illustrationColor': Color(0xFF7C3AED),
@@ -77,6 +81,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(Region / Supply Chain)',
       'headerColor': Color(0xFFDC2626),
       'icon': Icons.hub_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/distributor-B3qwv8Az.jpg',
       'illustrationIcon': Icons.alt_route_rounded,
       'illustrationBg': Color(0xFFFEF2F2),
       'illustrationColor': Color(0xFFDC2626),
@@ -92,6 +97,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(Storage & Fulfillment)',
       'headerColor': Color(0xFFD97706),
       'icon': Icons.warehouse_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/warehouse-BNAyH_lP.jpg',
       'illustrationIcon': Icons.shelves,
       'illustrationBg': Color(0xFFFFFBEB),
       'illustrationColor': Color(0xFFD97706),
@@ -107,6 +113,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
       'subtitle': '(Own Products)',
       'headerColor': Color(0xFFDB2777),
       'icon': Icons.precision_manufacturing_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/manufacturer-CZHXUwm_.jpg',
       'illustrationIcon': Icons.factory_rounded,
       'illustrationBg': Color(0xFFFDF2F8),
       'illustrationColor': Color(0xFFDB2777),
@@ -127,9 +134,13 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
     final shopState = ref.watch(shopProvider);
     final shopNotifier = ref.read(shopProvider.notifier);
 
+    final activeBiz = ref.watch(activeBusinessProvider);
+
     final businessName = businessState.businessName.isNotEmpty
         ? businessState.businessName
-        : (businessState.brandName.isNotEmpty ? businessState.brandName : 'sabari');
+        : (activeBiz.businessName.isNotEmpty
+            ? activeBiz.businessName
+            : (businessState.brandName.isNotEmpty ? businessState.brandName : 'My Business'));
 
     return SingleChildScrollView(
       padding: EdgeInsets.symmetric(
@@ -266,7 +277,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
                       crossAxisCount: crossAxisCount,
                       crossAxisSpacing: 16,
                       mainAxisSpacing: 16,
-                      mainAxisExtent: 440,
+                      mainAxisExtent: 360,
                     ),
                     itemCount: _storeTypes.length,
                     itemBuilder: (context, index) {
@@ -276,7 +287,10 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
                       return _buildStoreTypeCard(
                         item: item,
                         isSelected: isSelected,
-                        onTap: () => shopNotifier.toggleStoreType(item['id'] as String),
+                        onTap: () {
+                          debugPrint('🔘 [USER CLICK] Store Type Toggled: ${item['title']}');
+                          shopNotifier.toggleStoreType(item['id'] as String);
+                        },
                       );
                     },
                   );
@@ -291,6 +305,7 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
                 children: [
                   OutlinedButton.icon(
                     onPressed: () {
+                      debugPrint('🔘 [USER CLICK] ChooseStoreType -> Back clicked');
                       navNotifier.setShopSubView(ShopSubView.addPlatform);
                     },
                     icon: const Icon(Icons.arrow_back_rounded, size: 16),
@@ -306,6 +321,17 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
                   ),
                   ElevatedButton.icon(
                     onPressed: () {
+                      if (shopState.selectedStoreTypes.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('⚠️ Please select at least one store type to proceed.'),
+                            backgroundColor: Color(0xFFF59E0B),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                        return;
+                      }
+                      debugPrint('🔘 [USER CLICK] ChooseStoreType -> Next Step clicked -> Launching Shop Wizard (Selected Types: ${shopState.selectedStoreTypes})');
                       // Move to the 5-step Create Shop Wizard
                       shopNotifier.setWizardStep(1);
                       navNotifier.setShopSubView(ShopSubView.shopWizard);
@@ -431,23 +457,52 @@ class ChooseStoreTypeScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Graphic Illustration Container
-                    Container(
-                      height: 125,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: item['illustrationBg'] as Color,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: (item['illustrationBg'] as Color).withValues(alpha: 0.8),
+                    // Illustration Image Area
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        height: 125,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: item['illustrationBg'] as Color,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          item['illustrationIcon'] as IconData,
-                          size: 58,
-                          color: item['illustrationColor'] as Color,
-                        ),
+                        child: item['imageUrl'] != null
+                            ? Image.network(
+                                item['imageUrl'] as String,
+                                height: 125,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, progress) {
+                                  if (progress == null) return child;
+                                  return Center(
+                                    child: SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(headerColor),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Icon(
+                                      item['illustrationIcon'] as IconData,
+                                      size: 52,
+                                      color: headerColor,
+                                    ),
+                                  );
+                                },
+                              )
+                            : Center(
+                                child: Icon(
+                                  item['illustrationIcon'] as IconData,
+                                  size: 52,
+                                  color: headerColor,
+                                ),
+                              ),
                       ),
                     ),
 

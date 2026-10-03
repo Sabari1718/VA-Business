@@ -278,9 +278,22 @@ class _BusinessStep5TierScreenState extends ConsumerState<BusinessStep5TierScree
                           ),
                         ),
                         ElevatedButton(
-                          onPressed: () {
-                            navNotifier.navigateToStep6();
-                          },
+                          onPressed: setupState.isSubmitting
+                              ? null
+                              : () async {
+                                  final success = await setupNotifier.submitStep5CompanyScale();
+                                  if (!mounted) return;
+                                  if (success) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Company scale & tier saved to API!'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                  navNotifier.navigateToStep6();
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF2563EB),
                             foregroundColor: Colors.white,
@@ -293,8 +306,19 @@ class _BusinessStep5TierScreenState extends ConsumerState<BusinessStep5TierScree
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (setupState.isSubmitting) ...[
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Text(
-                                'Next: Business Type',
+                                setupState.isSubmitting ? 'Saving to API...' : 'Next: Business Type',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: isMobile ? 12 : 13.5,

@@ -302,9 +302,27 @@ class _BusinessStep2ContactScreenState extends ConsumerState<BusinessStep2Contac
                           ),
                         ),
                         ElevatedButton(
-                          onPressed: () {
-                            navNotifier.navigateToStep3();
-                          },
+                          onPressed: setupState.isSubmitting
+                              ? null
+                              : () async {
+                                  final notifier = ref.read(businessSetupProvider.notifier);
+                                  notifier.updatePrimaryEmail(_emailController.text.trim());
+                                  notifier.updatePhoneNumber(_phoneController.text.trim());
+                                  notifier.updateWebsiteUrl(_websiteController.text.trim());
+
+                                  final success = await notifier.submitStep2Contact();
+                                  if (!mounted) return;
+                                  if (success) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Contact & branding details saved to API!'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                  navNotifier.navigateToStep3();
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF2563EB),
                             foregroundColor: Colors.white,
@@ -316,13 +334,24 @@ class _BusinessStep2ContactScreenState extends ConsumerState<BusinessStep2Contac
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
-                            children: const [
+                            children: [
+                              if (setupState.isSubmitting) ...[
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Text(
-                                'Next: Upload Documents',
-                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                setupState.isSubmitting ? 'Saving to API...' : 'Next: Upload Documents',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                               ),
-                              SizedBox(width: 8),
-                              Icon(Icons.arrow_forward, size: 16, color: Colors.white),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.arrow_forward, size: 16, color: Colors.white),
                             ],
                           ),
                         ),

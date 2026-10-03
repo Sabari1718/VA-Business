@@ -105,8 +105,8 @@ class LeftSidebar extends ConsumerWidget {
               ),
               const SizedBox(height: 2),
               _SidebarSubItem(
-                icon: Icons.category_outlined,
-                label: 'Business Category',
+                icon: Icons.visibility_outlined,
+                label: 'View Category',
                 isSelected: navState.currentItem == NavItem.businessCategory,
                 onTap: () {
                   if (Navigator.of(context).canPop()) {

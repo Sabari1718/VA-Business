@@ -226,9 +226,22 @@ class _BusinessStep3DocumentsScreenState extends ConsumerState<BusinessStep3Docu
                           ),
                         ),
                         ElevatedButton(
-                          onPressed: () {
-                            navNotifier.navigateToStep4();
-                          },
+                          onPressed: setupState.isSubmitting
+                              ? null
+                              : () async {
+                                  final success = await setupNotifier.submitStep3Documents();
+                                  if (!mounted) return;
+                                  if (success) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Documents details saved to API!'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                  navNotifier.navigateToStep4();
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF2563EB),
                             foregroundColor: Colors.white,
@@ -241,8 +254,19 @@ class _BusinessStep3DocumentsScreenState extends ConsumerState<BusinessStep3Docu
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (setupState.isSubmitting) ...[
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Text(
-                                'Next: Bank Account',
+                                setupState.isSubmitting ? 'Saving to API...' : 'Next: Bank Account',
                                 style: TextStyle(
                                   fontSize: isMobile ? 13 : 14,
                                   fontWeight: FontWeight.w700,

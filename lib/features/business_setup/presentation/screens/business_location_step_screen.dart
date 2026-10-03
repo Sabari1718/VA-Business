@@ -54,21 +54,50 @@ class _BusinessLocationStepScreenState
     super.dispose();
   }
 
-  void _fetchPincodeDetails() {
-    setState(() {
-      _cityController.text = 'Chennai';
-      _districtController.text = 'Chennai';
-      _stateController.text = 'Tamil Nadu';
-    });
-    ref.read(businessSetupControllerProvider.notifier).updateCity('Chennai');
-    ref.read(businessSetupControllerProvider.notifier).updateDistrict('Chennai');
-    ref.read(businessSetupControllerProvider.notifier).updateState('Tamil Nadu');
+  Future<void> _fetchPincodeDetails() async {
+    final pincode = _pincodeController.text.trim();
+    if (pincode.length != 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Please enter a valid 6-digit Indian pincode'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('✅ Location details fetched for pincode!'),
-        duration: Duration(seconds: 1),
+        content: Text('📡 Fetching area details from API...'),
+        duration: Duration(milliseconds: 800),
       ),
     );
+
+    final success = await ref
+        .read(businessSetupControllerProvider.notifier)
+        .fetchPincode(pincode);
+    final updatedState = ref.read(businessSetupControllerProvider);
+
+    setState(() {
+      _cityController.text = updatedState.city;
+      _districtController.text = updatedState.district;
+      _stateController.text = updatedState.stateName;
+      _countryController.text = updatedState.country;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? '✅ Location details fetched for pincode $pincode!'
+                : '📍 Location auto-populated (${updatedState.city}, ${updatedState.stateName})',
+          ),
+          backgroundColor: const Color(0xFF10B981),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _fetchGpsLocation() {
@@ -88,6 +117,7 @@ class _BusinessLocationStepScreenState
 
   @override
   Widget build(BuildContext context) {
+    final setupState = ref.watch(businessSetupControllerProvider);
     final setupNotifier = ref.read(businessSetupControllerProvider.notifier);
     final navNotifier = ref.read(navigationProvider.notifier);
     final isMobile = ResponsiveBuilder.isMobile(context);
@@ -459,9 +489,31 @@ class _BusinessLocationStepScreenState
                               ),
                             ),
                             ElevatedButton(
-                              onPressed: () {
-                                navNotifier.navigateToStep2();
-                              },
+                              onPressed: setupState.isSubmitting
+                                  ? null
+                                  : () async {
+                                      setupNotifier.updatePincode(_pincodeController.text.trim());
+                                      setupNotifier.updateFullAddress(_addressController.text.trim());
+                                      setupNotifier.updateCity(_cityController.text.trim());
+                                      setupNotifier.updateDistrict(_districtController.text.trim());
+                                      setupNotifier.updateState(_stateController.text.trim());
+                                      setupNotifier.updateCountry(_countryController.text.trim());
+                                      setupNotifier.updateLatitude(_latController.text.trim());
+                                      setupNotifier.updateLongitude(_lngController.text.trim());
+
+                                      final success = await setupNotifier.submitStep1Address();
+                                      if (!mounted) return;
+                                      if (success) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('✅ Address details saved to API!'),
+                                            backgroundColor: Color(0xFF10B981),
+                                            duration: Duration(seconds: 1),
+                                          ),
+                                        );
+                                      }
+                                      navNotifier.navigateToStep2();
+                                    },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.primaryLight,
                                 foregroundColor: Colors.white,
@@ -475,13 +527,24 @@ class _BusinessLocationStepScreenState
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
-                                children: const [
+                                children: [
+                                  if (setupState.isSubmitting) ...[
+                                    const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
                                   Text(
-                                    'Next: Contact Details',
-                                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                    setupState.isSubmitting ? 'Saving to API...' : 'Next: Contact Details',
+                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                                   ),
-                                  SizedBox(width: 8),
-                                  Icon(Icons.arrow_forward_rounded, size: 16),
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.arrow_forward_rounded, size: 16),
                                 ],
                               ),
                             ),

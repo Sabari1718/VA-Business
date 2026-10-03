@@ -17,6 +17,7 @@ class AddPlatformScreen extends ConsumerWidget {
       'subtitle': 'Physical Shop + Local Sales',
       'headerColor': Color(0xFF2563EB),
       'icon': Icons.storefront_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/shop-D7FXfKjS.jpg',
       'illustrationIcon': Icons.store_mall_directory_rounded,
       'illustrationBg': Color(0xFFEFF6FF),
       'description':
@@ -37,6 +38,7 @@ class AddPlatformScreen extends ConsumerWidget {
       'subtitle': 'Online Selling (Local Delivery)',
       'headerColor': Color(0xFF16A34A),
       'icon': Icons.phone_android_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/local_online-BfAiiPzM.jpg',
       'illustrationIcon': Icons.delivery_dining_rounded,
       'illustrationBg': Color(0xFFF0FDF4),
       'description':
@@ -57,6 +59,7 @@ class AddPlatformScreen extends ConsumerWidget {
       'subtitle': 'Online Selling (Across India)',
       'headerColor': Color(0xFFE11D48),
       'icon': Icons.public_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/local_online-BfAiiPzM.jpg',
       'illustrationIcon': Icons.laptop_chromebook_rounded,
       'illustrationBg': Color(0xFFFFF1F2),
       'description':
@@ -77,6 +80,7 @@ class AddPlatformScreen extends ConsumerWidget {
       'subtitle': 'International Selling',
       'headerColor': Color(0xFFD97706),
       'icon': Icons.flight_takeoff_rounded,
+      'imageUrl': 'https://business-setup.jobes24x7.com/assets/export-Gblb5qXt.jpg',
       'illustrationIcon': Icons.sailing_rounded,
       'illustrationBg': Color(0xFFFFFBEB),
       'description':
@@ -102,9 +106,13 @@ class AddPlatformScreen extends ConsumerWidget {
     final shopState = ref.watch(shopProvider);
     final shopNotifier = ref.read(shopProvider.notifier);
 
+    final activeBiz = ref.watch(activeBusinessProvider);
+
     final businessName = businessState.businessName.isNotEmpty
         ? businessState.businessName
-        : (businessState.brandName.isNotEmpty ? businessState.brandName : 'sabari');
+        : (activeBiz.businessName.isNotEmpty
+            ? activeBiz.businessName
+            : (businessState.brandName.isNotEmpty ? businessState.brandName : 'My Business'));
 
     return SingleChildScrollView(
       padding: EdgeInsets.symmetric(
@@ -240,7 +248,7 @@ class AddPlatformScreen extends ConsumerWidget {
                       crossAxisCount: crossAxisCount,
                       crossAxisSpacing: 16,
                       mainAxisSpacing: 16,
-                      mainAxisExtent: 490,
+                      mainAxisExtent: 530,
                     ),
                     itemCount: _platforms.length,
                     itemBuilder: (context, index) {
@@ -250,7 +258,10 @@ class AddPlatformScreen extends ConsumerWidget {
                       return _buildPlatformCard(
                         item: item,
                         isSelected: isSelected,
-                        onTap: () => shopNotifier.selectPlatform(item['id'] as String),
+                        onTap: () {
+                          debugPrint('🔘 [USER CLICK] Platform Selected: ${item['title']}');
+                          shopNotifier.selectPlatform(item['id'] as String);
+                        },
                       );
                     },
                   );
@@ -264,25 +275,9 @@ class AddPlatformScreen extends ConsumerWidget {
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
                   onPressed: () {
-                    if (shopState.selectedPlatform == 'Shop') {
-                      navNotifier.setShopSubView(ShopSubView.chooseStoreType);
-                    } else {
-                      // For other platforms, create shop and navigate to viewCreatedShop
-                      shopNotifier.createShop(
-                        storeName: '$businessName ${shopState.selectedPlatform}',
-                        businessName: businessName,
-                        city: businessState.city.isNotEmpty ? businessState.city : 'Chennai',
-                      );
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Platform selected: ${shopState.selectedPlatform}!'),
-                          backgroundColor: const Color(0xFF10B981),
-                        ),
-                      );
-
-                      navNotifier.setShopSubView(ShopSubView.viewCreatedShop);
-                    }
+                    debugPrint('🔘 [USER CLICK] AddPlatform -> Next Step clicked (Selected Platform: "${shopState.selectedPlatform}")');
+                    // Navigate to ChooseStoreType so all platforms are created into the live database via API
+                    navNotifier.setShopSubView(ShopSubView.chooseStoreType);
                   },
                   iconAlignment: IconAlignment.end,
                   icon: const Icon(Icons.arrow_forward_rounded, size: 16, color: Colors.white),
@@ -403,20 +398,52 @@ class AddPlatformScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Illustration Area
-                    Container(
-                      height: 100,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: item['illustrationBg'] as Color,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          item['illustrationIcon'] as IconData,
-                          size: 52,
-                          color: headerColor,
+                    // Illustration Image Area
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        height: 135,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: item['illustrationBg'] as Color,
+                          borderRadius: BorderRadius.circular(10),
                         ),
+                        child: item['imageUrl'] != null
+                            ? Image.network(
+                                item['imageUrl'] as String,
+                                height: 135,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, progress) {
+                                  if (progress == null) return child;
+                                  return Center(
+                                    child: SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(headerColor),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Icon(
+                                      item['illustrationIcon'] as IconData,
+                                      size: 52,
+                                      color: headerColor,
+                                    ),
+                                  );
+                                },
+                              )
+                            : Center(
+                                child: Icon(
+                                  item['illustrationIcon'] as IconData,
+                                  size: 52,
+                                  color: headerColor,
+                                ),
+                              ),
                       ),
                     ),
 

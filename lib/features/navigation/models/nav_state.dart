@@ -17,6 +17,7 @@ enum ShopSubView {
   chooseStoreType,
   shopWizard,
   viewCreatedShop,
+  editStore,
 }
 
 enum SetupStepView {

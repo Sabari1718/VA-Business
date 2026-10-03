@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/network/api_constants.dart';
 import '../../../navigation/models/nav_state.dart';
 import '../../../navigation/providers/navigation_provider.dart';
 import '../../../business_setup/providers/business_providers.dart';
@@ -31,24 +33,26 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
   late TextEditingController _mapSearchCtrl;
 
   // Step 3 Controllers
-  late TextEditingController _sundayReasonCtrl;
+  final Map<String, TextEditingController> _closedDayControllers = {};
+
+  // Step 4 & 5 Search Controllers
+  late TextEditingController _primaryCategorySearchCtrl;
+  late TextEditingController _subCategorySearchCtrl;
+  late TextEditingController _brandSearchCtrl;
+  String _primaryCategorySearchQuery = '';
+  String _subCategorySearchQuery = '';
+  String _brandSearchQuery = '';
 
   @override
   void initState() {
     super.initState();
     final shop = ref.read(shopProvider);
-    final business = ref.read(businessSetupProvider);
-    final defaultStoreName = shop.storeName.isNotEmpty
-        ? shop.storeName
-        : (business.businessName.isNotEmpty
-            ? '${business.businessName} Outlet'
-            : 'Chennai Adyar Outlet');
 
-    _storeNameCtrl = TextEditingController(text: defaultStoreName);
-    _customerCareNameCtrl = TextEditingController(text: shop.customerCareName.isNotEmpty ? shop.customerCareName : 'Customer Care Executive');
-    _customerCarePhoneCtrl = TextEditingController(text: shop.customerCarePhone.isNotEmpty ? shop.customerCarePhone : '9876543210');
-    _altContactNameCtrl = TextEditingController(text: shop.altContactName.isNotEmpty ? shop.altContactName : 'Sales Executive');
-    _altPhoneCtrl = TextEditingController(text: shop.altPhone.isNotEmpty ? shop.altPhone : '9876543211');
+    _storeNameCtrl = TextEditingController(text: shop.storeName);
+    _customerCareNameCtrl = TextEditingController(text: shop.customerCareName);
+    _customerCarePhoneCtrl = TextEditingController(text: shop.customerCarePhone);
+    _altContactNameCtrl = TextEditingController(text: shop.altContactName);
+    _altPhoneCtrl = TextEditingController(text: shop.altPhone);
 
     _pincodeCtrl = TextEditingController(text: shop.pincode);
     _countryCtrl = TextEditingController(text: shop.country);
@@ -58,7 +62,89 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
     _cityVillageCtrl = TextEditingController(text: shop.cityVillage);
     _mapSearchCtrl = TextEditingController(text: shop.mapSearch);
 
-    _sundayReasonCtrl = TextEditingController(text: shop.sundayClosingReason);
+    _primaryCategorySearchCtrl = TextEditingController();
+    _subCategorySearchCtrl = TextEditingController();
+    _brandSearchCtrl = TextEditingController();
+
+    _primaryCategorySearchCtrl.addListener(() {
+      setState(() => _primaryCategorySearchQuery = _primaryCategorySearchCtrl.text.trim());
+    });
+    _subCategorySearchCtrl.addListener(() {
+      setState(() => _subCategorySearchQuery = _subCategorySearchCtrl.text.trim());
+    });
+    _brandSearchCtrl.addListener(() {
+      setState(() => _brandSearchQuery = _brandSearchCtrl.text.trim());
+    });
+
+    final defaultReasons = {
+      'Monday': shop.closedDayReasons['Monday'] ?? '',
+      'Tuesday': shop.closedDayReasons['Tuesday'] ?? '',
+      'Wednesday': shop.closedDayReasons['Wednesday'] ?? '',
+      'Thursday': shop.closedDayReasons['Thursday'] ?? '',
+      'Friday': shop.closedDayReasons['Friday'] ?? 'Weekly Off',
+      'Saturday': shop.closedDayReasons['Saturday'] ?? 'Weekend Off',
+      'Sunday': shop.closedDayReasons['Sunday'] ?? (shop.sundayClosingReason.isNotEmpty ? shop.sundayClosingReason : 'Weekly Holiday'),
+    };
+    for (final entry in defaultReasons.entries) {
+      _closedDayControllers[entry.key] = TextEditingController(text: entry.value);
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadPropagatorCategories();
+    });
+  }
+
+  Future<void> _loadPropagatorCategories() async {
+    final businessState = ref.read(businessSetupProvider);
+    final activeBusiness = ref.read(activeBusinessProvider);
+    final selectedId = ref.read(selectedBusinessIdProvider);
+    final prefs = await SharedPreferences.getInstance();
+
+    int effectivePropagatorId = 0;
+    if (businessState.propagatorId != null && businessState.propagatorId! > 0 && businessState.propagatorId != 14) {
+      effectivePropagatorId = businessState.propagatorId!;
+    } else {
+      final selectedParsed = int.tryParse(selectedId.replaceAll('#', ''));
+      if (selectedParsed != null && selectedParsed > 0 && selectedParsed != 14) {
+        effectivePropagatorId = selectedParsed;
+      } else {
+        final activeIdParsed = int.tryParse(activeBusiness.id.replaceAll('#', ''));
+        if (activeIdParsed != null && activeIdParsed > 0 && activeIdParsed != 14) {
+          effectivePropagatorId = activeIdParsed;
+        }
+      }
+    }
+
+    if (effectivePropagatorId <= 0 || effectivePropagatorId == 14) {
+      final saved = prefs.getString('propagator_id');
+      if (saved != null) {
+        final parsed = int.tryParse(saved);
+        if (parsed != null && parsed > 0 && parsed != 14) effectivePropagatorId = parsed;
+      }
+    }
+
+    final effectiveUserId = prefs.getString('user_main_id') ?? prefs.getString('user_id') ?? ApiConstants.defaultUserId;
+
+    if (effectivePropagatorId <= 0 || effectivePropagatorId == 14) {
+      try {
+        final propagators = await ref.read(shopApiServiceProvider).getPropagatorDetails(userId: effectiveUserId);
+        if (propagators.isNotEmpty) {
+          final sorted = List<Map<String, dynamic>>.from(propagators);
+          sorted.sort((a, b) => (int.tryParse(b['id']?.toString() ?? '0') ?? 0).compareTo(int.tryParse(a['id']?.toString() ?? '0') ?? 0));
+          effectivePropagatorId = int.tryParse(sorted.first['id']?.toString() ?? '') ?? 78;
+        } else {
+          effectivePropagatorId = 78;
+        }
+      } catch (_) {
+        effectivePropagatorId = 78;
+      }
+    }
+
+    print('📡 [SHOP WIZARD] Auto-loading categories for Propagator: $effectivePropagatorId, User: $effectiveUserId');
+    await ref.read(shopProvider.notifier).loadPropagatorMappingsAndConfigs(
+      propagatorId: effectivePropagatorId,
+      userId: effectiveUserId,
+    );
   }
 
   @override
@@ -75,7 +161,12 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
     _talukCtrl.dispose();
     _cityVillageCtrl.dispose();
     _mapSearchCtrl.dispose();
-    _sundayReasonCtrl.dispose();
+    _primaryCategorySearchCtrl.dispose();
+    _subCategorySearchCtrl.dispose();
+    _brandSearchCtrl.dispose();
+    for (final ctrl in _closedDayControllers.values) {
+      ctrl.dispose();
+    }
     super.dispose();
   }
 
@@ -102,7 +193,9 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
         mapSearch: _mapSearchCtrl.text,
       );
     } else if (currentStep == 3) {
-      shopNotifier.updateSundayClosingReason(_sundayReasonCtrl.text);
+      for (final entry in _closedDayControllers.entries) {
+        shopNotifier.updateClosedDayReason(entry.key, entry.value.text.trim());
+      }
     }
   }
 
@@ -110,21 +203,80 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
     _saveCurrentStepData();
     final currentStep = ref.read(shopProvider).wizardStep;
     final shopNotifier = ref.read(shopProvider.notifier);
-    final navNotifier = ref.read(navigationProvider.notifier);
-    final businessState = ref.read(businessSetupProvider);
 
     if (currentStep < 5) {
+      print('🔘 [USER CLICK] Shop Wizard: Moving from Step $currentStep -> Step ${currentStep + 1}');
       shopNotifier.setWizardStep(currentStep + 1);
     } else {
-      // Step 5: Submit Shop Setup
-      final bName = businessState.businessName.isNotEmpty
-          ? businessState.businessName
-          : (businessState.brandName.isNotEmpty ? businessState.brandName : 'circuit point');
+      print('🔘 [USER CLICK] Submit Shop Setup Clicked! Starting API submission...');
+      _submitShop();
+    }
+  }
 
-      shopNotifier.createShopFromState(
-        businessName: bName,
-      );
+  Future<void> _submitShop() async {
+    final shopNotifier = ref.read(shopProvider.notifier);
+    final navNotifier = ref.read(navigationProvider.notifier);
+    final businessState = ref.read(businessSetupProvider);
+    final activeBusiness = ref.read(activeBusinessProvider);
+    final selectedId = ref.read(selectedBusinessIdProvider);
+    final prefs = await SharedPreferences.getInstance();
+    final effectiveUserId = prefs.getString('user_main_id') ?? prefs.getString('user_id') ?? ApiConstants.defaultUserId;
 
+    // Resolve propagatorId
+    int effectivePropagatorId = 0;
+    if (businessState.propagatorId != null && businessState.propagatorId! > 0 && businessState.propagatorId != 14) {
+      effectivePropagatorId = businessState.propagatorId!;
+    } else {
+      final selectedParsed = int.tryParse(selectedId.replaceAll('#', ''));
+      if (selectedParsed != null && selectedParsed > 0 && selectedParsed != 14) {
+        effectivePropagatorId = selectedParsed;
+      } else {
+        final activeIdParsed = int.tryParse(activeBusiness.id.replaceAll('#', ''));
+        if (activeIdParsed != null && activeIdParsed > 0 && activeIdParsed != 14) {
+          effectivePropagatorId = activeIdParsed;
+        }
+      }
+    }
+
+    if (effectivePropagatorId <= 0 || effectivePropagatorId == 14) {
+      final saved = prefs.getString('propagator_id');
+      if (saved != null) {
+        final parsed = int.tryParse(saved);
+        if (parsed != null && parsed > 0 && parsed != 14) effectivePropagatorId = parsed;
+      }
+    }
+
+    if (effectivePropagatorId <= 0 || effectivePropagatorId == 14) {
+      try {
+        final propagators = await ref.read(shopApiServiceProvider).getPropagatorDetails(userId: effectiveUserId);
+        if (propagators.isNotEmpty) {
+          final sorted = List<Map<String, dynamic>>.from(propagators);
+          sorted.sort((a, b) => (int.tryParse(b['id']?.toString() ?? '0') ?? 0).compareTo(int.tryParse(a['id']?.toString() ?? '0') ?? 0));
+          effectivePropagatorId = int.tryParse(sorted.first['id']?.toString() ?? '') ?? 78;
+        } else {
+          effectivePropagatorId = 78;
+        }
+      } catch (_) {
+        effectivePropagatorId = 78;
+      }
+    }
+
+    final bName = businessState.businessName.isNotEmpty
+        ? businessState.businessName
+        : (activeBusiness.brandName.isNotEmpty
+            ? activeBusiness.brandName
+            : 'circuit');
+
+    print('📡 [START API FLOW] Submitting Shop Details: Store="$bName", PropagatorId=$effectivePropagatorId, UserId=$effectiveUserId');
+    final success = await shopNotifier.submitShopSetup(
+      propagatorId: effectivePropagatorId,
+      businessName: bName,
+      userId: effectiveUserId,
+    );
+
+    if (!mounted) return;
+
+    if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -132,15 +284,32 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
               const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
               const SizedBox(width: 8),
               Expanded(
-                child: Text('Shop "${_storeNameCtrl.text}" setup submitted successfully!'),
+                child: Text('Shop "${_storeNameCtrl.text}" created successfully!'),
               ),
             ],
           ),
           backgroundColor: const Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
         ),
       );
 
       navNotifier.setShopSubView(ShopSubView.viewCreatedShop);
+    } else {
+      final errorMsg = ref.read(shopProvider).errorMessage ??
+          'Failed to create shop. Please try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text(errorMsg)),
+            ],
+          ),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -908,23 +1077,41 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
               ),
               const SizedBox(width: 10),
               ElevatedButton.icon(
-                onPressed: () {
+                onPressed: () async {
                   final pin = _pincodeCtrl.text.trim();
                   if (pin.isNotEmpty) {
-                    setState(() {
-                      _countryCtrl.text = 'India';
-                      _stateCtrl.text = 'Tamil Nadu';
-                      _districtCtrl.text = 'Chennai';
-                      _talukCtrl.text = 'Guindy';
-                      _cityVillageCtrl.text = 'Adyar';
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Details fetched for Pincode: $pin'),
-                        backgroundColor: const Color(0xFF2563EB),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
+                    final details = await ref.read(shopApiServiceProvider).getPincodeDetails(pin);
+                    if (details != null && mounted) {
+                      setState(() {
+                        _countryCtrl.text = details['country'] ?? 'India';
+                        _stateCtrl.text = details['state'] ?? 'TamilNadu';
+                        _districtCtrl.text = details['district'] ?? 'Chennai';
+                        _talukCtrl.text = details['taluk'] ?? 'Adyar';
+                        _cityVillageCtrl.text = details['cityVillage'] ?? 'Adyar';
+                      });
+                      ref.read(shopProvider.notifier).updateAddress(
+                        pincode: pin,
+                        country: _countryCtrl.text,
+                        stateName: _stateCtrl.text,
+                        district: _districtCtrl.text,
+                        taluk: _talukCtrl.text,
+                        cityVillage: _cityVillageCtrl.text,
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Details fetched: ${_cityVillageCtrl.text}, ${_districtCtrl.text} ($pin)'),
+                          backgroundColor: const Color(0xFF2563EB),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    } else if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Pincode $pin not found, please enter manually'),
+                          backgroundColor: const Color(0xFFF59E0B),
+                        ),
+                      );
+                    }
                   }
                 },
                 icon: const Icon(Icons.sync_rounded, size: 15, color: Colors.white),
@@ -1389,10 +1576,12 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
                               color: isSelected ? const Color(0xFF1D4ED8) : const Color(0xFF64748B),
                             ),
                           ),
-                          if (isSelected) ...[
-                            const SizedBox(width: 4),
-                            const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF2563EB)),
-                          ],
+                          const SizedBox(width: 4),
+                          Icon(
+                            isSelected ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                            size: 13,
+                            color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                          ),
                         ],
                       ),
                     ),
@@ -1400,101 +1589,8 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
                 }).toList(),
               ),
 
-              const SizedBox(height: 16),
-              const Divider(height: 1, color: Color(0xFFF1F5F9)),
-              const SizedBox(height: 14),
-
-              // Closed Days Details (Editable)
-              const Text(
-                'Closed Days Details (Editable)',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1E293B),
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Sunday Closing Reason *',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF64748B),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFCBD5E1)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.event_busy_rounded, size: 14, color: Color(0xFF64748B)),
-                        SizedBox(width: 4),
-                        Text(
-                          'Sunday',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: SizedBox(
-                      height: 38,
-                      child: TextField(
-                        controller: _sundayReasonCtrl,
-                        style: const TextStyle(fontSize: 12.5),
-                        decoration: InputDecoration(
-                          hintText: 'e.g. Weekly Holiday',
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
-                          ),
-                          fillColor: Colors.white,
-                          filled: true,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      ref.read(shopProvider.notifier).updateSundayClosingReason(_sundayReasonCtrl.text);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Sunday closing reason saved!'),
-                          backgroundColor: Color(0xFF10B981),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.check, size: 14, color: Colors.white),
-                    label: const Text('Save', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              // Dynamic Closed Days Details (Editable)
+              _buildClosedDaysSection(shopState),
             ],
           ),
         ),
@@ -1521,6 +1617,236 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
         _buildBottomButtons(),
       ],
     );
+  }
+
+  Widget _buildClosedDaysSection(ShopState shopState) {
+    const allDays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final closedDays = allDays.where((d) => !shopState.workingDays.contains(d)).toList();
+
+    // If all 7 days are selected, hide Closed Days Details section completely (Matching Screenshot 2)
+    if (closedDays.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        const Divider(height: 1, color: Color(0xFFF1F5F9)),
+        const SizedBox(height: 14),
+
+        // Closed Days Details (Editable) Header
+        const Text(
+          'Closed Days Details (Editable)',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Responsive grid (2 columns on wide screen like web, 1 column on mobile)
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth > 650;
+            if (isWide && closedDays.length > 1) {
+              final leftDays = <String>[];
+              final rightDays = <String>[];
+              for (int i = 0; i < closedDays.length; i++) {
+                if (i % 2 == 0) {
+                  leftDays.add(closedDays[i]);
+                } else {
+                  rightDays.add(closedDays[i]);
+                }
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: leftDays.map((day) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _buildClosedDayCard(day, shopState),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      children: rightDays.map((day) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _buildClosedDayCard(day, shopState),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return Column(
+              children: closedDays.map((day) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildClosedDayCard(day, shopState),
+                );
+              }).toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClosedDayCard(String day, ShopState shopState) {
+    final controller = _closedDayControllers[day] ??= TextEditingController(
+      text: shopState.closedDayReasons[day] ?? _getDefaultDayReason(day),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: '$day Closing Reason ',
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF334155),
+            ),
+            children: const [
+              TextSpan(
+                text: '*',
+                style: TextStyle(
+                  color: Color(0xFFEF4444),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Container(
+              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFCBD5E1)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.calendar_today_outlined, size: 13, color: Color(0xFF64748B)),
+                  const SizedBox(width: 6),
+                  Text(
+                    day,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 38,
+                child: TextField(
+                  controller: controller,
+                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF1E293B)),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. $day Weekly Holiday',
+                    hintStyle: const TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
+                    ),
+                    fillColor: Colors.white,
+                    filled: true,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: 38,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  final text = controller.text.trim();
+                  ref.read(shopProvider.notifier).updateClosedDayReason(day, text);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                          const SizedBox(width: 8),
+                          Text('$day closing reason saved!'),
+                        ],
+                      ),
+                      backgroundColor: const Color(0xFF16A34A),
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.check, size: 14, color: Colors.white),
+                label: const Text(
+                  'Save',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF16A34A),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String _getDefaultDayReason(String day) {
+    if (day == 'Sunday') return 'Weekly Holiday';
+    if (day == 'Saturday') return 'Weekend Off';
+    if (day == 'Friday') return 'Weekly Off';
+    return '';
   }
 
   Widget _buildTimeCard({
@@ -1829,18 +2155,222 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
   }
 
   // -------------------------------------------------------------
-  // STEP 4: Business Category (Image 1)
+  // STEP 4: Business Category (Matching Image 2)
   // -------------------------------------------------------------
   Widget _buildStep4BusinessCategory(ShopState shopState) {
+    final shopNotifier = ref.read(shopProvider.notifier);
+
+    // Filtered Primary Categories
+    final filteredPrimary = shopState.primaryCategories.where((p) {
+      if (_primaryCategorySearchQuery.isEmpty) return true;
+      final name = p['name']?.toString().toLowerCase() ?? '';
+      return name.contains(_primaryCategorySearchQuery.toLowerCase());
+    }).toList();
+
+    // Filtered Secondary Categories
+    final filteredSecondary = shopState.secondaryCategories.where((s) {
+      if (_subCategorySearchQuery.isEmpty) return true;
+      final name = s['name']?.toString().toLowerCase() ?? '';
+      return name.contains(_subCategorySearchQuery.toLowerCase());
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Section Header
         _buildSectionHeader(
           icon: Icons.category_rounded,
           title: 'Business Category Classification',
           subtitle: 'Select your Sector, Sub-Sector, and mapped Category visual cards.',
         ),
         const SizedBox(height: 18),
+
+        // 1. Saved Category Mappings Section (Image 2)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.folder_open_rounded, size: 18, color: Color(0xFF16A34A)),
+                const SizedBox(width: 8),
+                Text(
+                  'Saved Category Mappings (${shopState.savedCategoryMappings.length})',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ],
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                _showAddCategoryMappingDialog();
+              },
+              icon: const Icon(Icons.add_rounded, size: 15, color: Color(0xFF2563EB)),
+              label: const Text(
+                '+ Add Another Sector / Sub-Sector',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFF2563EB)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Saved Category Mappings Cards
+        if (shopState.savedCategoryMappings.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFF64748B)),
+                SizedBox(width: 8),
+                Text('No saved category mappings yet.', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+              ],
+            ),
+          )
+        else
+          ...shopState.savedCategoryMappings.map((mapping) {
+            final sectorTitle = mapping['sector_title']?.toString() ?? 'Product';
+            final sectorName = mapping['sector_name']?.toString() ?? 'Electronics';
+            final subSectorName = mapping['sub_sector_name']?.toString() ?? 'Basic Electronics Components';
+            final pName = mapping['primary_category_name']?.toString() ?? 'Lights';
+            final subCount = mapping['sub_categories_count'] ?? 2;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF3B82F6), width: 1.5),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x082563EB),
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Top Row: Sector Title Badge + Action Icons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          sectorTitle,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF2563EB),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: () {},
+                            icon: const Icon(Icons.remove_red_eye_outlined, size: 16, color: Color(0xFF3B82F6)),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            tooltip: 'View details',
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: () {},
+                            icon: const Icon(Icons.edit_outlined, size: 16, color: Color(0xFFF59E0B)),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            tooltip: 'Edit mapping',
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: () {},
+                            icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            tooltip: 'Delete mapping',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    sectorName,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.account_tree_outlined, size: 14, color: Color(0xFF2563EB)),
+                      const SizedBox(width: 6),
+                      Text(
+                        subSectorName,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF475569), fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                    ),
+                    child: Text(
+                      pName,
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.check, size: 14, color: Color(0xFF2563EB)),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$subCount Sub-Categories',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF2563EB)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+
+        const SizedBox(height: 20),
+
+        // 2. Primary Category Visual Cards (Multi-Select)
         Container(
           width: double.infinity,
           decoration: BoxDecoration(
@@ -1853,151 +2383,322 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.all(14),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isSmall = constraints.maxWidth < 600;
-                    if (isSmall) {
-                      return Column(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             children: [
                               Icon(Icons.grid_view_rounded, size: 16, color: Color(0xFF2563EB)),
                               SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  'Primary Category Visual Cards (Multi-Select)',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF1E293B),
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
+                              Text(
+                                'Primary Category Visual Cards (Multi-Select)',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1E293B),
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          const Text(
+                          SizedBox(height: 3),
+                          Text(
                             'Select primary category cards to load secondary sub-categories.',
-                            style: TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            height: 36,
-                            child: TextField(
-                              decoration: InputDecoration(
-                                hintText: 'Search Primary Categories...',
-                                hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                                prefixIcon: const Icon(Icons.search, size: 15, color: Color(0xFF94A3B8)),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                                ),
-                                fillColor: Colors.white,
-                                filled: true,
-                              ),
-                            ),
+                            style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                           ),
                         ],
-                      );
-                    }
-
-                    return Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.grid_view_rounded, size: 16, color: Color(0xFF2563EB)),
-                                SizedBox(width: 6),
-                                Text(
-                                  'Primary Category Visual Cards (Multi-Select)',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF1E293B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              'Select primary category cards to load secondary sub-categories.',
-                              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                            ),
-                          ],
-                        ),
-                        SizedBox(
-                          width: 220,
-                          height: 36,
-                          child: TextField(
-                            decoration: InputDecoration(
-                              hintText: 'Search Primary Categories...',
-                              hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                              prefixIcon: const Icon(Icons.search, size: 15, color: Color(0xFF94A3B8)),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                              ),
-                              fillColor: Colors.white,
-                              filled: true,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-              const Divider(height: 1, color: Color(0xFFF1F5F9)),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 16),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFF1F5F9),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.inventory_2_outlined,
-                        size: 22,
-                        color: Color(0xFF94A3B8),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'No configured business categories available for this propagator.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF64748B),
-                        fontWeight: FontWeight.w500,
+                    SizedBox(
+                      width: 220,
+                      height: 36,
+                      child: TextField(
+                        controller: _primaryCategorySearchCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'Search Primary Categories...',
+                          hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                          prefixIcon: const Icon(Icons.search, size: 15, color: Color(0xFF94A3B8)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                          ),
+                          fillColor: Colors.white,
+                          filled: true,
+                        ),
                       ),
-                      textAlign: TextAlign.center,
                     ),
                   ],
                 ),
               ),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: filteredPrimary.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Text('No matching primary categories', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                        ),
+                      )
+                    : Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: filteredPrimary.map((p) {
+                          final pId = p['id'] as int;
+                          final pName = p['name']?.toString() ?? 'Lights';
+                          final subLabel = p['sub_options_label']?.toString() ?? '${p['sub_count'] ?? 2} sub-options';
+                          final isSelected = shopState.selectedPrimaryCategoryIds.contains(pId);
+
+                          return InkWell(
+                            onTap: () => shopNotifier.togglePrimaryCategory(pId),
+                            borderRadius: BorderRadius.circular(12),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              width: 190,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                                  width: isSelected ? 2 : 1,
+                                ),
+                                boxShadow: [
+                                  if (isSelected)
+                                    BoxShadow(
+                                      color: const Color(0xFF2563EB).withValues(alpha: 0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF2563EB),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.lightbulb_outline_rounded, color: Colors.white, size: 20),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          pName,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF1E293B),
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          subLabel,
+                                          style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(Icons.check_circle, size: 18, color: Color(0xFF2563EB)),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+              ),
             ],
           ),
         ),
+
+        const SizedBox(height: 20),
+
+        // 3. Secondary Categories Cards (Multi-Select)
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFECFDF5),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Icon(Icons.local_offer_rounded, size: 16, color: Color(0xFF059669)),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Secondary Categories Cards (Multi-Select)',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1E293B),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFECFDF5),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFA7F3D0)),
+                            ),
+                            child: Text(
+                              '${shopState.selectedSecondaryCategoryIds.length} Selected',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF047857),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      height: 36,
+                      child: TextField(
+                        controller: _subCategorySearchCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'Search Sub-Categories...',
+                          hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                          prefixIcon: const Icon(Icons.search, size: 15, color: Color(0xFF94A3B8)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                          ),
+                          fillColor: Colors.white,
+                          filled: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: filteredSecondary.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Text('No matching sub-categories found', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                        ),
+                      )
+                    : Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: filteredSecondary.map((s) {
+                          final sId = s['id'] as int;
+                          final sName = s['name']?.toString() ?? 'Sub-Category';
+                          final isSelected = shopState.selectedSecondaryCategoryIds.contains(sId);
+
+                          return InkWell(
+                            onTap: () => shopNotifier.toggleSecondaryCategory(sId),
+                            borderRadius: BorderRadius.circular(12),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              width: 190,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                                  width: isSelected ? 2 : 1,
+                                ),
+                                boxShadow: [
+                                  if (isSelected)
+                                    BoxShadow(
+                                      color: const Color(0xFF2563EB).withValues(alpha: 0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF10B981),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.sell_rounded, color: Colors.white, size: 18),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          sName,
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF1E293B),
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          'Sub-Category',
+                                          style: TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(Icons.check_circle, size: 18, color: Color(0xFF10B981)),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+              ),
+            ],
+          ),
+        ),
+
         const SizedBox(height: 28),
         _buildBottomButtons(),
       ],
@@ -2005,58 +2706,261 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
   }
 
   // -------------------------------------------------------------
-  // STEP 5: Brand Selection (Image 2)
+  // STEP 5: Brand Selection (Matching Image 2)
   // -------------------------------------------------------------
   Widget _buildStep5BrandSelection(ShopState shopState) {
+    final shopNotifier = ref.read(shopProvider.notifier);
+
+    // Selected secondary categories
+    final activeSubCategories = shopState.secondaryCategories.where((s) {
+      final sId = s['id'] as int;
+      return shopState.selectedSecondaryCategoryIds.contains(sId);
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
           icon: Icons.branding_watermark_rounded,
           title: 'Brand Mapping & Selection',
-          subtitle: 'Select a sub-category below to manage and assign its operational brands.',
+          subtitle: 'Select operational brands for each configured sub-category below.',
         ),
-        const SizedBox(height: 18),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+        const SizedBox(height: 14),
+
+        if (activeSubCategories.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.search_rounded, size: 18, color: Color(0xFF64748B)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _brandSearchCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'Search brands (e.g. Assembled, Imported, Make In India, Samsung)...',
+                      hintStyle: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF1E293B)),
+                  ),
+                ),
+                if (_brandSearchQuery.isNotEmpty)
+                  GestureDetector(
+                    onTap: () => _brandSearchCtrl.clear(),
+                    child: const Icon(Icons.clear_rounded, size: 16, color: Color(0xFF64748B)),
+                  ),
+              ],
+            ),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFEFF6FF),
-                  shape: BoxShape.circle,
+          const SizedBox(height: 14),
+        ],
+
+        if (activeSubCategories.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEFF6FF),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.info_outline_rounded,
+                    size: 24,
+                    color: Color(0xFF2563EB),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.info_outline_rounded,
-                  size: 24,
-                  color: Color(0xFF2563EB),
+                const SizedBox(height: 14),
+                const Text(
+                  'No sub-categories selected. Please select at least one sub-category in Step 4.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
+              ],
+            ),
+          )
+        else
+          ...activeSubCategories.map((sub) {
+            final sName = sub['name']?.toString() ?? 'Sub-Category';
+            final brandsList = shopState.brandsBySubCategory[sName] ?? [];
+            final selectedBrandIds = shopState.selectedBrandIdsBySubCategory[sName] ?? [];
+            final displayBrands = _brandSearchQuery.isEmpty
+                ? brandsList
+                : brandsList.where((b) {
+                    final name = (b['name'] ?? b['brand_name'] ?? '').toString().toLowerCase();
+                    return name.contains(_brandSearchQuery.toLowerCase());
+                  }).toList();
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 18),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x040F172A),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
               ),
-              const SizedBox(height: 14),
-              const Text(
-                'No sub-categories available. Please select or save category mappings in Step 4.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF64748B),
-                  fontWeight: FontWeight.w500,
-                ),
-                textAlign: TextAlign.center,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFECFDF5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.sell_rounded, size: 16, color: Color(0xFF059669)),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            sName,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text('Sub-Category', style: TextStyle(fontSize: 10, color: Color(0xFF475569))),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${selectedBrandIds.length} Brands Assigned',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF2563EB)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Operational Brands:',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (displayBrands.isEmpty)
+                    Text(
+                      _brandSearchQuery.isEmpty ? 'No brands mapped for this sub-category yet.' : 'No brands match "$_brandSearchQuery"',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: displayBrands.map((b) {
+                        final bId = int.tryParse(b['id']?.toString() ?? b['brand_id']?.toString() ?? '0') ?? 0;
+                        final bName = b['name']?.toString() ?? b['brand_name']?.toString() ?? 'Brand';
+                        final isSelected = selectedBrandIds.contains(bId);
+
+                        return InkWell(
+                          onTap: () => shopNotifier.toggleBrandForSubCategory(sName, bId),
+                          borderRadius: BorderRadius.circular(8),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1),
+                                width: isSelected ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                                  size: 15,
+                                  color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  bName,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                    color: isSelected ? const Color(0xFF1E3A8A) : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                ],
               ),
-            ],
-          ),
-        ),
+            );
+          }),
+
         const SizedBox(height: 28),
         _buildBottomButtons(),
       ],
+    );
+  }
+
+  void _showAddCategoryMappingDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Sector / Sub-Sector Mapping', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        content: const Text(
+          'You can add additional sectors, sub-sectors, and category mappings for your business profile.',
+          style: TextStyle(fontSize: 13, color: Color(0xFF475569)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2168,13 +3072,15 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
   }
 
   Widget _buildBottomButtons() {
-    final currentStep = ref.watch(shopProvider).wizardStep;
+    final shopState = ref.watch(shopProvider);
+    final currentStep = shopState.wizardStep;
+    final isSubmitting = shopState.isSubmitting;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         OutlinedButton.icon(
-          onPressed: _goToPreviousStep,
+          onPressed: isSubmitting ? null : _goToPreviousStep,
           icon: const Icon(Icons.arrow_back_rounded, size: 14),
           label: const Text('Back'),
           style: OutlinedButton.styleFrom(
@@ -2188,11 +3094,22 @@ class _ShopWizardScreenState extends ConsumerState<ShopWizardScreen> {
         ),
         const SizedBox(width: 12),
         ElevatedButton.icon(
-          onPressed: _goToNextStep,
+          onPressed: isSubmitting ? null : _goToNextStep,
           iconAlignment: IconAlignment.end,
-          icon: const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.white),
+          icon: isSubmitting
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.white),
           label: Text(
-            currentStep == 5 ? 'Submit Shop Setup' : 'Next Step',
+            isSubmitting
+                ? 'Creating Shop...'
+                : (currentStep == 5 ? 'Submit Shop Setup' : 'Next Step'),
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           ),
           style: ElevatedButton.styleFrom(

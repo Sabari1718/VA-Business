@@ -159,13 +159,14 @@ class _StartBusinessWizardDialogState
                           : () async {
                               final navigator = Navigator.of(context);
                               final messenger = ScaffoldMessenger.of(context);
+                              await setupNotifier.submitStep0Details();
                               final success = await setupNotifier.completeSetup();
-                              if (success && mounted) {
+                              if (mounted && success) {
                                 navigator.pop();
                                 messenger.showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                      '🎉 Business "${setupState.brandName.isEmpty ? 'Your Business' : setupState.brandName}" registered successfully!',
+                                      '🎉 Business "${setupState.brandName.isEmpty ? 'Your Business' : setupState.brandName}" created on API!',
                                     ),
                                     backgroundColor: const Color(0xFF10B981),
                                   ),

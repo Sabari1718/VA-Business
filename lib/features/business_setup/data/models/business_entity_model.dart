@@ -55,6 +55,8 @@ class BusinessProfile {
   final bool isGstVerified;
   final bool isUdyamVerified;
   final DateTime createdAt;
+  final int? addressId;
+  final int? contactId;
 
   const BusinessProfile({
     required this.id,
@@ -92,6 +94,8 @@ class BusinessProfile {
     this.accountStatus = 'Active',
     this.isGstVerified = true,
     this.isUdyamVerified = true,
+    this.addressId,
+    this.contactId,
     required this.createdAt,
   }) : businessName = businessName ?? brandName;
 
@@ -132,6 +136,8 @@ class BusinessProfile {
     bool? isGstVerified,
     bool? isUdyamVerified,
     DateTime? createdAt,
+    int? addressId,
+    int? contactId,
   }) {
     return BusinessProfile(
       id: id ?? this.id,
@@ -169,7 +175,106 @@ class BusinessProfile {
       accountStatus: accountStatus ?? this.accountStatus,
       isGstVerified: isGstVerified ?? this.isGstVerified,
       isUdyamVerified: isUdyamVerified ?? this.isUdyamVerified,
+      addressId: addressId ?? this.addressId,
+      contactId: contactId ?? this.contactId,
       createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  factory BusinessProfile.fromApi(
+    Map<String, dynamic> json, {
+    Map<String, dynamic>? address,
+    Map<String, dynamic>? contact,
+    Map<String, dynamic>? company,
+    Map<String, dynamic>? businessTypeData,
+    Map<String, dynamic>? bank,
+    Map<String, dynamic>? document,
+  }) {
+    final bName = json['business_name']?.toString() ??
+        json['brand_name']?.toString() ??
+        'Business #${json['id']}';
+
+    final structureStr = json['business_structure']?.toString().toLowerCase() ?? '';
+    EntityType entity = EntityType.proprietorship;
+    if (structureStr.contains('partnership') && !structureStr.contains('llp')) {
+      entity = EntityType.partnership;
+    } else if (structureStr.contains('pvt') || structureStr.contains('private')) {
+      entity = EntityType.pvtLtd;
+    } else if (structureStr.contains('opc') || structureStr.contains('one person')) {
+      entity = EntityType.opc;
+    } else if (structureStr.contains('llp')) {
+      entity = EntityType.llp;
+    }
+
+    final gstStatus = json['gst_registration_status']?.toString().toLowerCase() ?? '';
+    final gstPref = gstStatus.contains('reg') && !gstStatus.contains('un')
+        ? GstPreference.required
+        : GstPreference.notApplicable;
+
+    DateTime created = DateTime.now();
+    if (json['created_at'] != null) {
+      try {
+        created = DateTime.parse(json['created_at'].toString());
+      } catch (_) {}
+    }
+
+    int? parsedAddressId;
+    if (address?['id'] != null) {
+      if (address!['id'] is int) {
+        parsedAddressId = address['id'] as int;
+      } else {
+        parsedAddressId = int.tryParse(address['id'].toString());
+      }
+    }
+
+    int? parsedContactId;
+    if (contact?['id'] != null) {
+      if (contact!['id'] is int) {
+        parsedContactId = contact['id'] as int;
+      } else {
+        parsedContactId = int.tryParse(contact['id'].toString());
+      }
+    }
+
+    return BusinessProfile(
+      id: '#${json['id']}',
+      brandName: bName,
+      tradeName: json['trade_name']?.toString() ?? bName,
+      businessName: bName,
+      businessType: businessTypeData?['business_type']?.toString() ??
+          json['business_type']?.toString() ??
+          'Retail & Wholesale',
+      entityType: entity,
+      gstPreference: gstPref,
+      registrationStatus: 'Active',
+      tier: company?['company_tier']?.toString() ?? 'Startup',
+      establishmentYear: company?['establishment_year']?.toString() ?? '2024',
+      employeeCount: company?['number_of_employees']?.toString() ?? '1-10 Employees',
+      turnoverRange: company?['turnover_income']?.toString() ?? 'Up to 20 Lakhs',
+      phone: contact?['phone_number']?.toString() ?? '+91 9965437236',
+      email: contact?['primary_email']?.toString() ?? 'contact@${bName.toLowerCase().replaceAll(' ', '')}.com',
+      website: contact?['company_website_url']?.toString() ?? 'https://${bName.toLowerCase().replaceAll(' ', '')}.com',
+      pincode: address?['pincode']?.toString() ?? '600001',
+      city: address?['city_taluk']?.toString() ?? address?['city']?.toString() ?? 'Chennai',
+      district: address?['district']?.toString() ?? 'Chennai',
+      stateName: address?['state']?.toString() ?? 'Tamil Nadu',
+      country: address?['country']?.toString() ?? 'India',
+      fullAddress: address?['full_address']?.toString() ?? 'Official Business Address',
+      latitude: address?['latitude']?.toString() ?? '13.0827',
+      longitude: address?['longitude']?.toString() ?? '80.2707',
+      gstNumber: json['gst_number']?.toString() ?? '33AAAAA0000A1Z5',
+      udyamNumber: json['udyam_registration_number']?.toString() ?? 'UDYAM-TN-01-0012345',
+      cinNumber: json['cin_number']?.toString() ?? '',
+      accountHolderName: bank?['account_holder_name']?.toString() ?? bName,
+      bankName: bank?['bank_name']?.toString() ?? 'HDFC Bank',
+      branchName: bank?['branch_name']?.toString() ?? 'Adyar',
+      accountNumber: bank?['account_number']?.toString() ?? '50100456789012',
+      ifscCode: bank?['ifsc_code']?.toString() ?? 'HDFC0001234',
+      accountType: bank?['account_type']?.toString() ?? 'Current',
+      accountStatus: bank?['account_status']?.toString() ?? 'Active',
+      addressId: parsedAddressId,
+      contactId: parsedContactId,
+      createdAt: created,
     );
   }
 }

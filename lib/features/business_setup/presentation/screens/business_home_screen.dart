@@ -28,6 +28,7 @@ import '../../../create_shop/presentation/screens/add_platform_screen.dart';
 import '../../../create_shop/presentation/screens/choose_store_type_screen.dart';
 import '../../../create_shop/presentation/screens/shop_wizard_screen.dart';
 import '../../../create_shop/presentation/screens/view_created_shop_screen.dart';
+import '../../../create_shop/presentation/screens/edit_store_screen.dart';
 
 class BusinessHomeScreen extends ConsumerWidget {
   const BusinessHomeScreen({super.key});
@@ -74,6 +75,8 @@ class BusinessHomeScreen extends ConsumerWidget {
             return const ShopWizardScreen();
           case ShopSubView.viewCreatedShop:
             return const ViewCreatedShopScreen();
+          case ShopSubView.editStore:
+            return const EditStoreScreen();
         }
       case NavItem.startBusiness:
         switch (navState.setupStepView) {

@@ -229,18 +229,32 @@ class BusinessStep6TypeScreen extends ConsumerWidget {
                           ),
                         ),
                         ElevatedButton(
-                          onPressed: () {
-                            if (setupState.selectedBusinessTypes.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Please select at least one Business Type.'),
-                                  backgroundColor: Colors.orange,
-                                ),
-                              );
-                              return;
-                            }
-                            navNotifier.navigateToStep7();
-                          },
+                          onPressed: setupState.isSubmitting
+                              ? null
+                              : () async {
+                                  if (setupState.selectedBusinessTypes.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Please select at least one Business Type.'),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final success = await setupNotifier.submitStep6BusinessType();
+                                  if (!context.mounted) return;
+                                  if (success) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Business types saved to API!'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                  navNotifier.navigateToStep7();
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF2563EB),
                             foregroundColor: Colors.white,
@@ -255,8 +269,19 @@ class BusinessStep6TypeScreen extends ConsumerWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (setupState.isSubmitting) ...[
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Text(
-                                'Proceed to Step 7 (Category)',
+                                setupState.isSubmitting ? 'Saving to API...' : 'Proceed to Step 7 (Category)',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: isMobile ? 12 : 13.5,

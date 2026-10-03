@@ -235,6 +235,7 @@ class _BasicBusinessDetailsScreenState
                             helper: 'Format: UDYAM-XX-00-0000000 (Mandatory)',
                             controller: _udyamController,
                             icon: Icons.check_circle_outline_rounded,
+                            hintText: 'UDYAM-TN-01-0012345',
                             onChanged: (val) => setupNotifier.updateUdyamNumber(val),
                           );
 
@@ -243,6 +244,7 @@ class _BasicBusinessDetailsScreenState
                             helper: '15-digit GSTIN number (Mandatory).',
                             controller: _gstController,
                             icon: Icons.receipt_long_outlined,
+                            hintText: '33AAAAA0000A1Z5',
                             onChanged: (val) => setupNotifier.updateGstNumber(val),
                           );
 
@@ -251,6 +253,7 @@ class _BasicBusinessDetailsScreenState
                             helper: '21-character Corporate ID (Optional).',
                             controller: _cinController,
                             icon: Icons.apartment_outlined,
+                            hintText: '21-digit CIN (Optional)',
                             onChanged: (val) => setupNotifier.updateCinNumber(val),
                           );
 
@@ -376,7 +379,22 @@ class _BasicBusinessDetailsScreenState
                           ),
                         ),
                         ElevatedButton(
-                          onPressed: () => navNotifier.navigateToLocationStep(),
+                          onPressed: setupState.isSubmitting
+                              ? null
+                              : () async {
+                                  final success = await setupNotifier.submitStep0Details();
+                                  if (!mounted) return;
+                                  if (success) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Business profile created on API!'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                  navNotifier.navigateToLocationStep();
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primaryLight,
                             foregroundColor: Colors.white,
@@ -391,13 +409,24 @@ class _BasicBusinessDetailsScreenState
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
-                            children: const [
+                            children: [
+                              if (setupState.isSubmitting) ...[
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
                               Text(
-                                'Save & Continue',
-                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                setupState.isSubmitting ? 'Saving to API...' : 'Save & Continue',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                               ),
-                              SizedBox(width: 8),
-                              Icon(Icons.arrow_forward_rounded, size: 16),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.arrow_forward_rounded, size: 16),
                             ],
                           ),
                         ),
@@ -521,6 +550,7 @@ class _BasicBusinessDetailsScreenState
     required TextEditingController controller,
     required IconData icon,
     required ValueChanged<String> onChanged,
+    String? hintText,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -532,6 +562,8 @@ class _BasicBusinessDetailsScreenState
           onChanged: onChanged,
           style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
           decoration: InputDecoration(
+            hintText: hintText,
+            hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
             prefixIcon: Icon(icon, size: 18, color: AppColors.iconColor),
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             filled: true,

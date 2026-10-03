@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../navigation/models/nav_state.dart';
 import '../../../navigation/providers/navigation_provider.dart';
 import '../../data/models/business_entity_model.dart';
 import '../../providers/business_providers.dart';
 import '../widgets/dashboard_footer.dart';
+import '../../../../core/network/api_constants.dart';
+import '../../../create_shop/providers/shop_providers.dart';
 
 class BusinessDetailsScreen extends ConsumerStatefulWidget {
   const BusinessDetailsScreen({super.key});
@@ -40,11 +43,28 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
   late TextEditingController _ifscController;
 
   String? _loadedBizId;
+  String? _lastUpdatedHash;
+  String? _lastFetchedBizId;
+  bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
     _initControllers();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      var selectedId = ref.read(selectedBusinessIdProvider);
+      if (selectedId.isEmpty) {
+        selectedId = prefs.getString('propagator_id') ?? '';
+      }
+      final pId = int.tryParse(selectedId.replaceAll('#', ''));
+      if (pId != null && pId > 0) {
+        await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+        if (mounted) {
+          _populateControllers(ref.read(activeBusinessProvider), force: true);
+        }
+      }
+    });
   }
 
   void _initControllers() {
@@ -68,9 +88,11 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
     _ifscController = TextEditingController();
   }
 
-  void _populateControllers(BusinessProfile biz) {
-    if (_loadedBizId == biz.id) return;
+  void _populateControllers(BusinessProfile biz, {bool force = false}) {
+    final currentHash = '${biz.id}_${biz.businessName}_${biz.pincode}_${biz.city}_${biz.district}_${biz.stateName}_${biz.country}_${biz.fullAddress}_${biz.latitude}_${biz.longitude}_${biz.phone}_${biz.email}_${biz.website}_${biz.bankName}_${biz.branchName}_${biz.accountNumber}_${biz.ifscCode}';
+    if (!force && _loadedBizId == biz.id && _lastUpdatedHash == currentHash) return;
     _loadedBizId = biz.id;
+    _lastUpdatedHash = currentHash;
 
     _nameController.text = biz.businessName;
     _pincodeController.text = biz.pincode;
@@ -151,40 +173,154 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
     setState(() {});
   }
 
-  void _saveChanges(BusinessProfile activeBiz) {
-    final updatedBiz = activeBiz.copyWith(
-      businessName: _nameController.text.trim(),
-      brandName: _nameController.text.trim(),
-      pincode: _pincodeController.text.trim(),
-      city: _cityController.text.trim(),
-      district: _districtController.text.trim(),
-      stateName: _stateController.text.trim(),
-      country: _countryController.text.trim(),
-      fullAddress: _addressController.text.trim(),
-      latitude: _latController.text.trim(),
-      longitude: _lngController.text.trim(),
-      phone: _phoneController.text.trim(),
-      email: _emailController.text.trim(),
-      website: _websiteController.text.trim(),
-      bankName: _bankNameController.text.trim(),
-      branchName: _branchController.text.trim(),
-      accountNumber: _accountNumberController.text.trim(),
-      ifscCode: _ifscController.text.trim(),
-    );
+  Future<void> _saveChanges(BusinessProfile activeBiz) async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
 
-    ref.read(businessListProvider.notifier).updateBusiness(updatedBiz);
+    try {
+      int pId = int.tryParse(activeBiz.id.replaceAll('#', '')) ?? 0;
+      if (pId == 0) {
+        final prefs = await SharedPreferences.getInstance();
+        pId = int.tryParse(prefs.getString('propagator_id') ?? '') ?? 0;
+      }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Business profile updated successfully!'),
-        backgroundColor: Color(0xFF10B981),
-        duration: Duration(seconds: 2),
-      ),
-    );
+      if (pId > 0) {
+        final apiService = ref.read(businessApiServiceProvider);
+        final lat = double.tryParse(_latController.text.trim()) ?? 13.0827;
+        final lng = double.tryParse(_lngController.text.trim()) ?? 80.2707;
 
-    ref.read(navigationProvider.notifier).navigateToBusinessDetails(
-          mode: BusinessDetailsMode.viewProfile,
+        // 1. Save Address API (Calls PUT /propagator-address/update/:id to match Web)
+        final res = await apiService.saveOrUpdatePropagatorAddress(
+          addressId: activeBiz.addressId,
+          propagatorId: pId,
+          pincode: _pincodeController.text.trim().isNotEmpty
+              ? _pincodeController.text.trim()
+              : '600001',
+          fullAddress: _addressController.text.trim().isNotEmpty
+              ? _addressController.text.trim()
+              : 'Official Business Address',
+          cityTaluk: _cityController.text.trim().isNotEmpty
+              ? _cityController.text.trim()
+              : 'Chennai',
+          district: _districtController.text.trim().isNotEmpty
+              ? _districtController.text.trim()
+              : 'Chennai',
+          state: _stateController.text.trim().isNotEmpty
+              ? _stateController.text.trim()
+              : 'Tamil Nadu',
+          country: _countryController.text.trim().isNotEmpty
+              ? _countryController.text.trim()
+              : 'India',
+          latitude: lat,
+          longitude: lng,
         );
+        debugPrint('✅ [Propagator Address Saved/Updated]: $res');
+
+        // 2. Save Contact API if contact info present
+        if (_phoneController.text.trim().isNotEmpty || _emailController.text.trim().isNotEmpty) {
+          try {
+            final contactRes = await apiService.saveOrUpdatePropagatorContact(
+              contactId: activeBiz.contactId,
+              propagatorId: pId,
+              primaryEmail: _emailController.text.trim().isNotEmpty
+                  ? _emailController.text.trim()
+                  : activeBiz.email,
+              phoneNumber: _phoneController.text.trim().isNotEmpty
+                  ? _phoneController.text.trim()
+                  : activeBiz.phone,
+              companyWebsiteUrl: _websiteController.text.trim(),
+            );
+            debugPrint('✅ [Propagator Contact Saved/Updated]: $contactRes');
+          } catch (e) {
+            debugPrint('⚠️ Error updating contact: $e');
+          }
+        }
+
+        // 3. Save Bank API if bank info present
+        if (_accountNumberController.text.trim().isNotEmpty || _bankNameController.text.trim().isNotEmpty) {
+          try {
+            final bankRes = await apiService.createPropagatorBankDetails(
+              propagatorId: pId,
+              accountHolderName: _nameController.text.trim().isNotEmpty
+                  ? _nameController.text.trim()
+                  : activeBiz.businessName,
+              bankName: _bankNameController.text.trim().isNotEmpty
+                  ? _bankNameController.text.trim()
+                  : 'Bank',
+              branchName: _branchController.text.trim().isNotEmpty
+                  ? _branchController.text.trim()
+                  : 'Branch',
+              accountNumber: _accountNumberController.text.trim(),
+              accountType: activeBiz.accountType.isNotEmpty ? activeBiz.accountType : 'Current',
+              ifscCode: _ifscController.text.trim().isNotEmpty
+                  ? _ifscController.text.trim()
+                  : 'IFSC0001',
+            );
+            debugPrint('✅ [Propagator Bank Created/Updated]: $bankRes');
+          } catch (e) {
+            debugPrint('⚠️ Error updating bank: $e');
+          }
+        }
+      }
+
+      final updatedBiz = activeBiz.copyWith(
+        businessName: _nameController.text.trim(),
+        brandName: _nameController.text.trim(),
+        pincode: _pincodeController.text.trim(),
+        city: _cityController.text.trim(),
+        district: _districtController.text.trim(),
+        stateName: _stateController.text.trim(),
+        country: _countryController.text.trim(),
+        fullAddress: _addressController.text.trim(),
+        latitude: _latController.text.trim(),
+        longitude: _lngController.text.trim(),
+        phone: _phoneController.text.trim(),
+        email: _emailController.text.trim(),
+        website: _websiteController.text.trim(),
+        bankName: _bankNameController.text.trim(),
+        branchName: _branchController.text.trim(),
+        accountNumber: _accountNumberController.text.trim(),
+        ifscCode: _ifscController.text.trim(),
+      );
+
+      ref.read(businessListProvider.notifier).updateBusiness(updatedBiz);
+
+      if (pId > 0) {
+        await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+        if (mounted) {
+          _populateControllers(ref.read(activeBusinessProvider), force: true);
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Propagator address updated successfully!'),
+            backgroundColor: Color(0xFF10B981),
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        ref.read(navigationProvider.notifier).navigateToBusinessDetails(
+              mode: BusinessDetailsMode.viewProfile,
+            );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error updating address: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update address: $e'),
+            backgroundColor: const Color(0xFFEF4444),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
   }
 
   @override
@@ -195,27 +331,57 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 768;
 
-    _populateControllers(activeBiz);
+    final isEditMode = navState.businessDetailsMode == BusinessDetailsMode.editProfile;
+    if (!isEditMode) {
+      _populateControllers(activeBiz);
+    }
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 12 : 28,
-        vertical: isMobile ? 16 : 24,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1180),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (navState.businessDetailsMode == BusinessDetailsMode.overview)
-                _buildOverviewView(context, isMobile, navNotifier, activeBiz)
-              else
-                _buildProfileView(context, isMobile, navNotifier, activeBiz,
-                    isEditMode: navState.businessDetailsMode == BusinessDetailsMode.editProfile),
-              const SizedBox(height: 36),
-              const DashboardFooter(),
-            ],
+    if (_lastFetchedBizId != activeBiz.id) {
+      _lastFetchedBizId = activeBiz.id;
+      final pId = int.tryParse(activeBiz.id.replaceAll('#', ''));
+      if (pId != null && pId > 0) {
+        Future.microtask(() async {
+          await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+          if (mounted) {
+            _populateControllers(ref.read(activeBusinessProvider), force: true);
+            setState(() {});
+          }
+        });
+      }
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        final pId = int.tryParse(activeBiz.id.replaceAll('#', ''));
+        if (pId != null && pId > 0) {
+          await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+          if (mounted) {
+            _populateControllers(ref.read(activeBusinessProvider), force: true);
+            setState(() {});
+          }
+        }
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 28,
+          vertical: isMobile ? 16 : 24,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1180),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (navState.businessDetailsMode == BusinessDetailsMode.overview)
+                  _buildOverviewView(context, isMobile, navNotifier, activeBiz)
+                else
+                  _buildProfileView(context, isMobile, navNotifier, activeBiz,
+                      isEditMode: navState.businessDetailsMode == BusinessDetailsMode.editProfile),
+                const SizedBox(height: 36),
+                const DashboardFooter(),
+              ],
+            ),
           ),
         ),
       ),
@@ -291,7 +457,14 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
               children: [
                 // 1. View Profile Button
                 ElevatedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
+                    final pId = int.tryParse(biz.id.replaceAll('#', ''));
+                    if (pId != null && pId > 0) {
+                      await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+                      if (mounted) {
+                        _populateControllers(ref.read(activeBusinessProvider), force: true);
+                      }
+                    }
                     navNotifier.navigateToBusinessDetails(mode: BusinessDetailsMode.viewProfile);
                   },
                   icon: const Icon(Icons.remove_red_eye_outlined, size: 16, color: Colors.white),
@@ -307,12 +480,19 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
                   ),
                 ),
 
-                // 2. View Category Button (Photo 5)
+                // 2. View Category Button (Web Match - Image 1)
                 ElevatedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
+                    final pId = int.tryParse(biz.id.replaceAll('#', '').trim());
+                    if (pId != null && pId > 0) {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('propagator_id', pId.toString());
+                      ref.read(businessSetupProvider.notifier).setPropagatorId(pId);
+                      ref.read(selectedBusinessIdProvider.notifier).select(biz.id);
+                    }
                     navNotifier.navigateToBusinessCategory();
                   },
-                  icon: const Icon(Icons.local_offer_outlined, size: 16, color: Color(0xFF1E293B)),
+                  icon: const Icon(Icons.grid_view_rounded, size: 16, color: Color(0xFF1E293B)),
                   label: const Text(
                     'View Category',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
@@ -326,25 +506,39 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
                   ),
                 ),
 
-                // 3. View Store Button
+                // 3. View Store Button (Matching Photo 2)
                 ElevatedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    var selectedId = ref.read(selectedBusinessIdProvider);
+                    if (selectedId.isEmpty || selectedId == '14') {
+                      selectedId = biz.id.isNotEmpty ? biz.id : (prefs.getString('propagator_id') ?? '78');
+                    }
+                    final pId = int.tryParse(selectedId.replaceAll('#', '')) ?? 78;
+                    await prefs.setString('propagator_id', pId.toString());
+                    ref.read(businessSetupProvider.notifier).setPropagatorId(pId);
+                    final effectiveUserId = prefs.getString('user_main_id') ?? prefs.getString('user_id') ?? ApiConstants.defaultUserId;
+                    ref.read(shopProvider.notifier).fetchShopsFromApi(
+                      propagatorId: pId,
+                      userId: effectiveUserId,
+                    );
                     navNotifier.setShopSubView(ShopSubView.viewCreatedShop);
                   },
-                  icon: const Icon(Icons.storefront_outlined, size: 16, color: Colors.white),
+                  icon: const Icon(Icons.storefront_outlined, size: 16, color: Color(0xFF1E293B)),
                   label: const Text(
                     'View Store',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF8B5CF6),
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     elevation: 0,
                   ),
                 ),
 
-                // 4. Add Platform Button
+                // 4. Add Platform Button (Blue Button - Image 1)
                 ElevatedButton.icon(
                   onPressed: () {
                     navNotifier.setShopSubView(ShopSubView.addPlatform);
@@ -355,7 +549,7 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF059669),
+                    backgroundColor: const Color(0xFF2563EB),
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     elevation: 0,
@@ -962,11 +1156,17 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
         ),
         const SizedBox(width: 8),
         ElevatedButton.icon(
-          onPressed: () => _saveChanges(biz),
-          icon: const Icon(Icons.save_outlined, size: 15, color: Colors.white),
-          label: const Text(
-            'Save Changes',
-            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
+          onPressed: _isSaving ? null : () => _saveChanges(biz),
+          icon: _isSaving
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.save_outlined, size: 15, color: Colors.white),
+          label: Text(
+            _isSaving ? 'Saving...' : 'Save Changes',
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
           ),
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF2563EB),
@@ -998,7 +1198,16 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
       // Photo 3 Buttons: [ Edit Profile ] [ Add More Business ]
       return [
         OutlinedButton.icon(
-          onPressed: () {
+          onPressed: () async {
+            final pId = int.tryParse(biz.id.replaceAll('#', ''));
+            if (pId != null && pId > 0) {
+              await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+              if (mounted) {
+                _populateControllers(ref.read(activeBusinessProvider), force: true);
+              }
+            } else {
+              _populateControllers(biz, force: true);
+            }
             navNotifier.navigateToBusinessDetails(mode: BusinessDetailsMode.editProfile);
           },
           icon: const Icon(Icons.edit_outlined, size: 15, color: Color(0xFF2563EB)),
@@ -1008,6 +1217,36 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
           ),
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFFBFDBFE)),
+            backgroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: () async {
+            final pId = int.tryParse(biz.id.replaceAll('#', ''));
+            if (pId != null && pId > 0) {
+              await ref.read(businessListProvider.notifier).loadBusinessOnLogin(pId);
+              if (mounted) {
+                _populateControllers(ref.read(activeBusinessProvider), force: true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Synced with live server data!'),
+                    backgroundColor: Color(0xFF2563EB),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            }
+          },
+          icon: const Icon(Icons.sync, size: 15, color: Color(0xFF475569)),
+          label: const Text(
+            'Sync',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+          ),
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: Color(0xFFCBD5E1)),
             backgroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1129,23 +1368,25 @@ class _BusinessDetailsScreenState extends ConsumerState<BusinessDetailsScreen> {
             children: [
               const Icon(Icons.location_on, color: Color(0xFF2563EB), size: 18),
               const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    'Business Address & Location Details',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textDark,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Business Address & Location Details',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textDark,
+                      ),
                     ),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Enter the official business address and location details.',
-                    style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
-                  ),
-                ],
+                    SizedBox(height: 2),
+                    Text(
+                      'Enter the official business address and location details.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

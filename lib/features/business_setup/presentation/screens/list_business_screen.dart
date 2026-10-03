@@ -19,55 +19,89 @@ class ListBusinessScreen extends ConsumerWidget {
     final businesses = ref.watch(businessListProvider);
     final selectedBizId = ref.watch(selectedBusinessIdProvider);
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 16 : 32,
-        vertical: isMobile ? 20 : 28,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1180),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Top Header Bar
-              _buildHeader(context, isMobile, navNotifier),
+    return RefreshIndicator(
+      onRefresh: () => ref.read(businessListProvider.notifier).refreshBusinesses(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 16 : 32,
+          vertical: isMobile ? 20 : 28,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1180),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top Header Bar
+                _buildHeader(context, isMobile, navNotifier, ref),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // 3 Stat Overview Cards
-              _buildStatCardsRow(isMobile, businesses.length.toString()),
+                // 3 Stat Overview Cards
+                _buildStatCardsRow(isMobile, businesses.length.toString()),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Section 01: Propagator (N)
-              _buildPropagatorSection(
-                context,
-                isMobile,
-                navNotifier,
-                ref,
-                businesses,
-                selectedBizId,
-              ),
+                // Section 01: Propagator (N)
+                _buildPropagatorSection(
+                  context,
+                  isMobile,
+                  navNotifier,
+                  ref,
+                  businesses,
+                  selectedBizId,
+                ),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Section 02: Partner Businesses (0)
-              _buildPartnerSection(context, isMobile),
+                // Section 02: Partner Businesses (0)
+                _buildPartnerSection(context, isMobile),
 
-              const SizedBox(height: 36),
+                const SizedBox(height: 36),
 
-              // Footer
-              const DashboardFooter(),
-            ],
+                // Footer
+                const DashboardFooter(),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // Header with Title, Subtitle, and "+ Add More Business" button
-  Widget _buildHeader(BuildContext context, bool isMobile, NavigationNotifier navNotifier) {
+  // Header with Title, Subtitle, Sync API and "+ Add More Business" button
+  Widget _buildHeader(BuildContext context, bool isMobile, NavigationNotifier navNotifier, WidgetRef ref) {
+    final actions = Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      children: [
+        OutlinedButton.icon(
+          onPressed: () async {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🔄 Fetching latest businesses from API...'),
+                duration: Duration(milliseconds: 800),
+              ),
+            );
+            await ref.read(businessListProvider.notifier).refreshBusinesses();
+          },
+          icon: const Icon(Icons.refresh_rounded, size: 16),
+          label: const Text(
+            'Sync API',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.primaryLight,
+            side: const BorderSide(color: AppColors.primaryLight),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        _buildAddMoreButton(navNotifier),
+      ],
+    );
+
     return isMobile
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -91,7 +125,7 @@ class ListBusinessScreen extends ConsumerWidget {
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
-                child: _buildAddMoreButton(navNotifier),
+                child: actions,
               ),
             ],
           )
@@ -120,7 +154,7 @@ class ListBusinessScreen extends ConsumerWidget {
                   ),
                 ],
               ),
-              _buildAddMoreButton(navNotifier),
+              actions,
             ],
           );
   }
@@ -378,9 +412,10 @@ class ListBusinessScreen extends ConsumerWidget {
                           context: context,
                           biz: biz,
                           isSelected: isSelected,
-                          onLogin: () {
+                          onLogin: () async {
                             ref.read(selectedBusinessIdProvider.notifier).select(biz.id);
                             navNotifier.navigateToBusinessDetails(mode: BusinessDetailsMode.overview);
+                            await ref.read(businessListProvider.notifier).loadBusinessOnLogin(biz.id);
                           },
                         ),
                       );

@@ -183,59 +183,7 @@ class TopNavBar extends ConsumerWidget implements PreferredSizeWidget {
             const SizedBox(width: 4),
           ],
 
-          // Notifications with badge '3'
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                padding: const EdgeInsets.all(6),
-                constraints: const BoxConstraints(),
-                onPressed: () {
-                  navNotifier.clearNotifications();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Notifications viewed'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                },
-                icon: const Icon(
-                  Icons.notifications_none_rounded,
-                  size: 20,
-                  color: AppColors.iconColor,
-                ),
-                tooltip: 'Notifications',
-              ),
-              if (navState.notificationCount > 0)
-                Positioned(
-                  right: 2,
-                  top: 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(
-                      color: AppColors.primaryLight,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 15,
-                      minHeight: 15,
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${navState.notificationCount}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8.5,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-          ],
-          ),
 
-          const SizedBox(width: 6),
 
           // User Profile: Sabarii / Guest
           Row(

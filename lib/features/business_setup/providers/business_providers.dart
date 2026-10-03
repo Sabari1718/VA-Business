@@ -1,10 +1,20 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/network/api_constants.dart';
 import '../data/models/business_entity_model.dart';
 import '../data/models/business_step_model.dart';
+import '../data/models/business_structure_model.dart';
 import '../data/repositories/business_repository.dart';
+import '../data/repositories/business_api_service.dart';
+
+final businessApiServiceProvider = Provider<BusinessApiService>((ref) {
+  return BusinessApiService();
+});
 
 final businessRepositoryProvider = Provider<BusinessRepository>((ref) {
-  return BusinessRepository();
+  final apiService = ref.watch(businessApiServiceProvider);
+  return BusinessRepository(apiService: apiService);
 });
 
 final setupStepsProvider = Provider<List<BusinessStepModel>>((ref) {
@@ -15,7 +25,39 @@ final setupStepsProvider = Provider<List<BusinessStepModel>>((ref) {
 class BusinessListNotifier extends Notifier<List<BusinessProfile>> {
   @override
   List<BusinessProfile> build() {
+    Future.microtask(() => refreshBusinesses());
     return ref.watch(businessRepositoryProvider).getBusinesses();
+  }
+
+  Future<void> refreshBusinesses() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ?? ApiConstants.defaultUserId;
+      final repo = ref.read(businessRepositoryProvider);
+      final list = await repo.fetchBusinessesFromApi(userId: effectiveUserId);
+      state = List.from(list);
+
+      if (list.isNotEmpty) {
+        final currentSelected = ref.read(selectedBusinessIdProvider);
+        final hasCurrent = list.any((b) => b.id == currentSelected);
+
+        final activeBiz = hasCurrent
+            ? list.firstWhere((b) => b.id == currentSelected)
+            : list.first;
+
+        ref.read(selectedBusinessIdProvider.notifier).select(activeBiz.id);
+
+        final pId = int.tryParse(activeBiz.id.replaceAll('#', ''));
+        if (pId != null && pId > 0) {
+          await prefs.setString('propagator_id', pId.toString());
+          ref.read(businessSetupProvider.notifier).setPropagatorId(pId);
+          await repo.fetchSingleBusinessDetails(pId);
+          state = List.from(repo.getBusinesses());
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error refreshing businesses: $e');
+    }
   }
 
   void addBusiness(BusinessProfile profile) {
@@ -27,6 +69,30 @@ class BusinessListNotifier extends Notifier<List<BusinessProfile>> {
     ref.read(businessRepositoryProvider).updateBusiness(profile);
     state = List.from(ref.read(businessRepositoryProvider).getBusinesses());
   }
+
+  Future<BusinessProfile?> loadBusinessOnLogin(dynamic propagatorId) async {
+    final intId = propagatorId is int
+        ? propagatorId
+        : int.tryParse(propagatorId.toString().replaceAll('#', ''));
+    if (intId == null) return null;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('propagator_id', intId.toString());
+      ref.read(businessSetupProvider.notifier).setPropagatorId(intId);
+      ref.read(selectedBusinessIdProvider.notifier).select(intId.toString());
+
+      final repo = ref.read(businessRepositoryProvider);
+      final updated = await repo.fetchSingleBusinessDetails(intId);
+      if (updated != null) {
+        state = List.from(repo.getBusinesses());
+      }
+      return updated;
+    } catch (e) {
+      debugPrint('⚠️ Error loading business on login: $e');
+      return null;
+    }
+  }
 }
 
 final businessListProvider =
@@ -36,7 +102,7 @@ final businessListProvider =
 
 class SelectedBusinessIdNotifier extends Notifier<String> {
   @override
-  String build() => '#21';
+  String build() => '';
 
   void select(String id) {
     state = id;
@@ -49,24 +115,26 @@ final selectedBusinessIdProvider =
 final activeBusinessProvider = Provider<BusinessProfile>((ref) {
   final list = ref.watch(businessListProvider);
   final selectedId = ref.watch(selectedBusinessIdProvider);
-  return list.firstWhere(
-    (b) => b.id == selectedId,
-    orElse: () => list.isNotEmpty
-        ? list.first
-        : BusinessProfile(
-            id: '#21',
-            brandName: 'sabari',
-            tradeName: 'sabari',
-            entityType: EntityType.proprietorship,
-            gstPreference: GstPreference.required,
-            createdAt: DateTime.now(),
-          ),
+  if (list.isNotEmpty) {
+    final match = list.where((b) => b.id == selectedId);
+    if (match.isNotEmpty) return match.first;
+    return list.first;
+  }
+  return BusinessProfile(
+    id: '#26',
+    brandName: 'circuit',
+    tradeName: 'circuit',
+    businessName: 'circuit',
+    entityType: EntityType.proprietorship,
+    gstPreference: GstPreference.required,
+    createdAt: DateTime.now(),
   );
 });
 
 // Setup Form State
 class BusinessSetupState {
   final int currentStepIndex;
+  final int? propagatorId;
   final String businessName;
   final String brandName;
   final String tradeName;
@@ -86,6 +154,8 @@ class BusinessSetupState {
   final String latitude;
   final String longitude;
   final bool isSubmitting;
+  final bool isPincodeLoading;
+  final String? apiErrorMessage;
 
   // Step 2: Contact & Branding
   final String primaryEmail;
@@ -141,32 +211,36 @@ class BusinessSetupState {
   // Step 8: Brand Selection & Configuration
   final bool isConfigurationSaved;
   final List<String> selectedBrands;
+  final List<Map<String, dynamic>> savedCategoryConfigurations;
 
   const BusinessSetupState({
     this.currentStepIndex = 0,
-    this.businessName = 'sabari',
+    this.propagatorId,
+    this.businessName = '',
     this.brandName = '',
     this.tradeName = '',
     this.isWithGst = true,
-    this.udyamNumber = 'UDYAM-TN-01-0012345',
-    this.gstNumber = '33AAAAA0000A1Z5',
-    this.cinNumber = 'U12345TN2026PTC000000',
+    this.udyamNumber = '',
+    this.gstNumber = '',
+    this.cinNumber = '',
     this.selectedStructureIndex = 0,
     this.selectedEntityType = EntityType.proprietorship,
     this.selectedGst = GstPreference.required,
-    this.pincode = '600001',
+    this.pincode = '',
     this.fullAddress = '',
-    this.city = 'Chennai',
-    this.district = 'Chennai',
-    this.stateName = 'Tamil Nadu',
-    this.country = 'India',
+    this.city = '',
+    this.district = '',
+    this.stateName = '',
+    this.country = '',
     this.latitude = '13.0827',
     this.longitude = '80.2707',
     this.isSubmitting = false,
+    this.isPincodeLoading = false,
+    this.apiErrorMessage,
     // Step 2
-    this.primaryEmail = 'contact@mycompany.com',
-    this.phoneNumber = '9876543210',
-    this.websiteUrl = 'https://www.mycompany.com',
+    this.primaryEmail = '',
+    this.phoneNumber = '',
+    this.websiteUrl = '',
     this.companyLogoName,
     this.companyLogoPath,
     this.companyIconName,
@@ -197,9 +271,9 @@ class BusinessSetupState {
     this.chequeFileName,
     this.chequeFilePath,
     // Step 5
-    this.establishmentYear = '2024',
+    this.establishmentYear = '',
     this.employeeCount = '1 - 10 Employees (Micro)',
-    this.turnoverRange = 'Select Turnover Range',
+    this.turnoverRange = 'Up to 20 Lakhs',
     this.selectedTier = 'STARTUP',
     // Step 6
     this.selectedBusinessTypes = const ['Trade', 'Retail'],
@@ -211,10 +285,12 @@ class BusinessSetupState {
     // Step 8
     this.isConfigurationSaved = false,
     this.selectedBrands = const [],
+    this.savedCategoryConfigurations = const [],
   });
 
   BusinessSetupState copyWith({
     int? currentStepIndex,
+    int? propagatorId,
     String? businessName,
     String? brandName,
     String? tradeName,
@@ -234,6 +310,8 @@ class BusinessSetupState {
     String? latitude,
     String? longitude,
     bool? isSubmitting,
+    bool? isPincodeLoading,
+    String? apiErrorMessage,
     String? primaryEmail,
     String? phoneNumber,
     String? websiteUrl,
@@ -275,9 +353,11 @@ class BusinessSetupState {
     List<String>? selectedPrimaryCategories,
     bool? isConfigurationSaved,
     List<String>? selectedBrands,
+    List<Map<String, dynamic>>? savedCategoryConfigurations,
   }) {
     return BusinessSetupState(
       currentStepIndex: currentStepIndex ?? this.currentStepIndex,
+      propagatorId: propagatorId ?? this.propagatorId,
       businessName: businessName ?? this.businessName,
       brandName: brandName ?? this.brandName,
       tradeName: tradeName ?? this.tradeName,
@@ -297,6 +377,8 @@ class BusinessSetupState {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       isSubmitting: isSubmitting ?? this.isSubmitting,
+      isPincodeLoading: isPincodeLoading ?? this.isPincodeLoading,
+      apiErrorMessage: apiErrorMessage,
       primaryEmail: primaryEmail ?? this.primaryEmail,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       websiteUrl: websiteUrl ?? this.websiteUrl,
@@ -338,16 +420,41 @@ class BusinessSetupState {
       selectedPrimaryCategories: selectedPrimaryCategories ?? this.selectedPrimaryCategories,
       isConfigurationSaved: isConfigurationSaved ?? this.isConfigurationSaved,
       selectedBrands: selectedBrands ?? this.selectedBrands,
+      savedCategoryConfigurations: savedCategoryConfigurations ?? this.savedCategoryConfigurations,
     );
   }
 }
 
 class BusinessSetupController extends Notifier<BusinessSetupState> {
   @override
-  BusinessSetupState build() => const BusinessSetupState();
+  BusinessSetupState build() {
+    _loadSavedPropagatorId();
+    return const BusinessSetupState();
+  }
+
+  void setSavedCategoryConfigurations(List<Map<String, dynamic>> configs) {
+    state = state.copyWith(savedCategoryConfigurations: configs);
+  }
+
+  Future<void> _loadSavedPropagatorId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedId = prefs.getString('propagator_id');
+      if (savedId != null) {
+        final parsed = int.tryParse(savedId);
+        if (parsed != null) {
+          state = state.copyWith(propagatorId: parsed);
+        }
+      }
+    } catch (_) {}
+  }
 
   void setStep(int step) {
     state = state.copyWith(currentStepIndex: step);
+  }
+
+  void setPropagatorId(int id) {
+    state = state.copyWith(propagatorId: id);
   }
 
   void updateBusinessName(String name) {
@@ -512,25 +619,393 @@ class BusinessSetupController extends Notifier<BusinessSetupState> {
     state = const BusinessSetupState();
   }
 
-  Future<bool> completeSetup() async {
-    state = state.copyWith(isSubmitting: true);
-    await Future.delayed(const Duration(milliseconds: 300));
+  // ===========================================================================
+  // REAL API CONNECTIVITY METHODS (WITH FULL TERMINAL LOGGING)
+  // ===========================================================================
 
-    final newProfile = BusinessProfile(
-      id: 'biz-${DateTime.now().millisecondsSinceEpoch}',
-      brandName: state.businessName.isNotEmpty
-          ? state.businessName
-          : (state.brandName.isEmpty ? 'My New Business' : state.brandName),
-      tradeName: state.tradeName.isEmpty ? '${state.businessName} Enterprise' : state.tradeName,
-      entityType: state.selectedEntityType,
-      gstPreference: state.isWithGst ? GstPreference.required : GstPreference.notApplicable,
-      registrationStatus: 'Submitted',
-      createdAt: DateTime.now(),
+  /// Fetch Pincode Details API
+  Future<bool> fetchPincode(String pincode) async {
+    state = state.copyWith(isPincodeLoading: true);
+    final repo = ref.read(businessRepositoryProvider);
+    final details = await repo.apiService.fetchPincodeDetails(pincode);
+    state = state.copyWith(isPincodeLoading: false);
+
+    if (details != null) {
+      state = state.copyWith(
+        district: details['district']?.isNotEmpty ?? false ? details['district'] : state.district,
+        stateName: details['state']?.isNotEmpty ?? false ? details['state'] : state.stateName,
+        city: details['city']?.isNotEmpty ?? false ? details['city'] : state.city,
+        country: details['country']?.isNotEmpty ?? false ? details['country'] : state.country,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /// Step 0: Save Propagator Details
+  Future<bool> submitStep0Details() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final structureTitle = businessStructuresList[state.selectedStructureIndex.clamp(0, businessStructuresList.length - 1)].title;
+
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+
+      final res = await repo.apiService.createPropagatorDetails(
+        userId: effectiveUserId,
+        businessName: state.businessName.isNotEmpty ? state.businessName : 'sabari',
+        gstStatus: state.isWithGst ? 'Registered' : 'Unregistered',
+        udyamNumber: state.udyamNumber,
+        gstNumber: state.isWithGst ? state.gstNumber : null,
+        cinNumber: state.cinNumber,
+        businessStructure: structureTitle,
+      );
+
+      int? newId;
+      if (res['data'] is Map) {
+        newId = int.tryParse(res['data']['id']?.toString() ?? '');
+      } else if (res['data'] is int) {
+        newId = res['data'];
+      } else if (res['id'] != null) {
+        newId = int.tryParse(res['id'].toString());
+      }
+
+      final effectiveId = newId ?? state.propagatorId ?? 14;
+      state = state.copyWith(propagatorId: effectiveId, isSubmitting: false);
+
+      await prefs.setString('propagator_id', effectiveId.toString());
+      await prefs.setString('businessName', state.businessName);
+
+      // Immediately refresh businesses from API so newly created business shows up in list & dropdown
+      await ref.read(businessListProvider.notifier).refreshBusinesses();
+
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 0 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 1: Save Propagator Address
+  Future<bool> submitStep1Address() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+      final pId = state.propagatorId ?? 14;
+
+      await repo.apiService.createPropagatorAddress(
+        propagatorId: pId,
+        pincode: state.pincode.isNotEmpty ? state.pincode : '600001',
+        fullAddress: state.fullAddress.isNotEmpty ? state.fullAddress : 'Official Business Address',
+        cityTaluk: state.city.isNotEmpty ? state.city : 'Chennai',
+        district: state.district.isNotEmpty ? state.district : 'Chennai',
+        state: state.stateName.isNotEmpty ? state.stateName : 'Tamil Nadu',
+        country: state.country.isNotEmpty ? state.country : 'India',
+        latitude: double.tryParse(state.latitude),
+        longitude: double.tryParse(state.longitude),
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 1 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 2: Save Propagator Contact
+  Future<bool> submitStep2Contact() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+      final pId = state.propagatorId ?? 14;
+
+      await repo.apiService.createPropagatorContact(
+        propagatorId: pId,
+        primaryEmail: state.primaryEmail.isNotEmpty ? state.primaryEmail : 'contact@sabari.com',
+        phoneNumber: state.phoneNumber.isNotEmpty ? state.phoneNumber : '9876543210',
+        companyWebsiteUrl: state.websiteUrl.isNotEmpty ? state.websiteUrl : null,
+        companyLogo: state.companyLogoPath,
+        companyIcon: state.companyIconPath,
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 2 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 3: Save Propagator Documents
+  Future<bool> submitStep3Documents() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+      final pId = state.propagatorId ?? 14;
+
+      await repo.apiService.createPropagatorDocuments(
+        propagatorId: pId,
+        udyamCertificate: state.udyamFilePath,
+        gstCertificate: state.gstFilePath,
+        cinCertificate: state.cinFilePath,
+        geotaggedStorePhoto: state.gpsFilePath,
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 3 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 4: Save Propagator Bank Details
+  Future<bool> submitStep4Bank() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+      final pId = state.propagatorId ?? 14;
+
+      await repo.apiService.createPropagatorBankDetails(
+        propagatorId: pId,
+        accountHolderName: state.accountHolderName.isNotEmpty ? state.accountHolderName : 'sabari',
+        bankName: state.bankName.isNotEmpty ? state.bankName : 'HDFC Bank',
+        branchName: state.branchName.isNotEmpty ? state.branchName : 'Main Branch',
+        accountNumber: state.accountNumber.isNotEmpty ? state.accountNumber : '50100456789012',
+        ifscCode: state.ifscCode.isNotEmpty ? state.ifscCode : 'HDFC0001234',
+        accountType: state.accountType,
+        accountStatus: state.accountStatus,
+        bankAddress: state.bankAddress.isNotEmpty ? state.bankAddress : 'Chennai',
+        supportingDocument: state.chequeFilePath,
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 4 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 5: Save Propagator Company Scale & Tier
+  Future<bool> submitStep5CompanyScale() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+      final pId = state.propagatorId ?? 14;
+
+      int estYear = int.tryParse(state.establishmentYear) ?? 2024;
+      await repo.apiService.createPropagatorCompanyScale(
+        propagatorId: pId,
+        establishmentYear: estYear,
+        numberOfEmployees: state.employeeCount,
+        turnoverIncome: state.turnoverRange,
+        companyTier: state.selectedTier,
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 5 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 6: Save Propagator Business Type
+  Future<bool> submitStep6BusinessType() async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+      final effectiveUserId = prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          ApiConstants.defaultUserId;
+      final pId = state.propagatorId ?? 14;
+
+      final joinedTypes = state.selectedBusinessTypes.join(', ');
+      await repo.apiService.createPropagatorBusinessType(
+        propagatorId: pId,
+        businessType: joinedTypes.isNotEmpty ? joinedTypes : 'Retail, Wholesale',
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 6 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 7: Save Propagator Category Mapping
+  Future<bool> submitStep7CategoryMapping({
+    int? sectorTitleId,
+    int? sectorId,
+    int? subSectorId,
+    List<dynamic>? primaryCategories,
+    Map<String, dynamic>? brands,
+    List<String>? brandNames,
+    int? propagatorId,
+    String? userId,
+  }) async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+
+      int pId = propagatorId ?? state.propagatorId ?? 0;
+      if (pId <= 0) {
+        final activeBiz = ref.read(activeBusinessProvider);
+        pId = int.tryParse(activeBiz.id.replaceAll('#', '').trim()) ?? 0;
+      }
+      if (pId <= 0) {
+        final saved = prefs.getString('propagator_id');
+        if (saved != null) {
+          final parsed = int.tryParse(saved);
+          if (parsed != null && parsed > 0) pId = parsed;
+        }
+      }
+      if (pId <= 0) {
+        pId = 77; // Fallback to active propagator ID
+      }
+
+      final effectiveUserId = userId ??
+          prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          '4282284422';
+
+      await repo.apiService.createPropagatorBusinessMapping(
+        propagatorId: pId,
+        sectorTitleId: sectorTitleId ?? 1,
+        sectorId: sectorId ?? 1,
+        subSectorId: subSectorId ?? 1,
+        primaryCategories: primaryCategories ?? state.selectedPrimaryCategories,
+        brands: brands,
+        brandNames: brandNames,
+        userId: effectiveUserId,
+      );
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 7 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  /// Step 8: Save Propagator Brand Mapping & Complete Setup
+  Future<bool> submitStep8BrandMapping({
+    int? propagatorId,
+    String? userId,
+    List<int>? brandIds,
+    List<String>? brandNames,
+    Map<String, dynamic>? brands,
+  }) async {
+    state = state.copyWith(isSubmitting: true, apiErrorMessage: null);
+    try {
+      final repo = ref.read(businessRepositoryProvider);
+      final prefs = await SharedPreferences.getInstance();
+
+      int pId = propagatorId ?? state.propagatorId ?? 0;
+      if (pId <= 0) {
+        final activeBiz = ref.read(activeBusinessProvider);
+        pId = int.tryParse(activeBiz.id.replaceAll('#', '').trim()) ?? 0;
+      }
+      if (pId <= 0) {
+        final saved = prefs.getString('propagator_id');
+        if (saved != null) {
+          final parsed = int.tryParse(saved);
+          if (parsed != null && parsed > 0) pId = parsed;
+        }
+      }
+      if (pId <= 0) {
+        pId = 77; // Fallback to active propagator ID
+      }
+
+      final effectiveUserId = userId ??
+          prefs.getString('user_main_id') ??
+          prefs.getString('user_id') ??
+          '4282284422';
+
+      final effectiveBrandNames = brandNames ?? state.selectedBrands;
+      final effectiveBrands = brands ?? {'default': state.selectedBrands};
+
+      await repo.apiService.createPropagatorBrandMapping(
+        propagatorId: pId,
+        userId: effectiveUserId,
+        brandIds: brandIds,
+        brandNames: effectiveBrandNames,
+        brands: effectiveBrands,
+      );
+
+      // Call GET /propagator-details?user_id={userId} to refresh user businesses
+      try {
+        await repo.apiService.getPropagatorDetailsByUser(effectiveUserId);
+      } catch (_) {}
+
+      // Refresh real business list from backend
+      await ref.read(businessListProvider.notifier).refreshBusinesses();
+
+      state = state.copyWith(isSubmitting: false);
+      return true;
+    } catch (e) {
+      debugPrint('❌ [Step 8 API Error]: $e');
+      state = state.copyWith(isSubmitting: false, apiErrorMessage: e.toString());
+      return false;
+    }
+  }
+
+  Future<bool> completeSetup({
+    int? propagatorId,
+    String? userId,
+    List<int>? brandIds,
+    List<String>? brandNames,
+    Map<String, dynamic>? brands,
+  }) async {
+    return await submitStep8BrandMapping(
+      propagatorId: propagatorId,
+      userId: userId,
+      brandIds: brandIds,
+      brandNames: brandNames,
+      brands: brands,
     );
-
-    ref.read(businessListProvider.notifier).addBusiness(newProfile);
-    state = state.copyWith(isSubmitting: false);
-    return true;
   }
 }
 
